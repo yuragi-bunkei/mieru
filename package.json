@@ -1,0 +1,16 @@
+{
+  "name": "mieru",
+  "version": "0.1.0",
+  "private": true,
+  "description": "STL live viewer for 3D print modeling with Claude Code",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "three": "^0.185.1",
+    "ws": "^8.21.1"
+  }
+}
