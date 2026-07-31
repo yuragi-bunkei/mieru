@@ -42,6 +42,9 @@ function start({ watchDir, port = 5301 }) {
     } catch {
       res.writeHead(400); return res.end('bad request');
     }
+    if (pathname.includes('\0')) {
+      res.writeHead(400); return res.end('bad request');
+    }
     if (pathname === '/') return sendFile(res, path.join(PUBLIC_DIR, 'index.html'));
     if (pathname.startsWith('/vendor/three/')) {
       const p = safeJoin(THREE_DIR, pathname.slice('/vendor/three/'.length));

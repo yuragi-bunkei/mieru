@@ -48,3 +48,19 @@ test('serves index, vendor three, and blocks traversal', async (t) => {
 test('start throws on missing watch dir', () => {
   assert.throws(() => start({ watchDir: '/no/such/dir/mieru-xyz', port: 0 }));
 });
+
+test('rejects null byte in path without crashing the server', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-'));
+  const app = start({ watchDir: dir, port: 0 });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  const evil = await get(port, '/files/%00foo.stl');
+  assert.ok(evil.status === 400 || evil.status === 404);
+
+  // Server must still be alive and answering normal requests.
+  const index = await get(port, '/');
+  assert.strictEqual(index.status, 200);
+  assert.match(index.body, /mieru/);
+});
