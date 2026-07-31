@@ -1,6 +1,8 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { WebSocketServer } = require('ws');
+const chokidar = require('chokidar');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
@@ -61,11 +63,62 @@ function start({ watchDir, port = 5301 }) {
     return sendFile(res, p);
   });
 
+  const files = new Map(); // relPath -> {path, size, mtime}
+  const wss = new WebSocketServer({ server });
+
+  function fileList() {
+    return [...files.values()].sort((a, b) => a.path.localeCompare(b.path));
+  }
+  function broadcast() {
+    const msg = JSON.stringify({ type: 'list', files: fileList() });
+    for (const client of wss.clients) {
+      if (client.readyState === 1) client.send(msg);
+    }
+  }
+
+  wss.on('connection', (ws) => {
+    ws.send(JSON.stringify({ type: 'list', files: fileList() }));
+  });
+
+  // chokidar v5: globパターンは未サポートのため、rootディレクトリ自体を監視し
+  // イベント側で拡張子 .stl（大小文字問わず）にフィルタする。
+  const watcher = chokidar.watch(root, {
+    cwd: root,
+    ignoreInitial: false,
+    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+  });
+  function isStl(relPath) {
+    return path.extname(relPath).toLowerCase() === '.stl';
+  }
+  function upsert(relPath) {
+    if (!isStl(relPath)) return;
+    fs.stat(path.join(root, relPath), (err, st) => {
+      if (err) return;
+      files.set(relPath, {
+        path: relPath.split(path.sep).join('/'),
+        size: st.size,
+        mtime: st.mtimeMs,
+      });
+      broadcast();
+    });
+  }
+  watcher.on('add', upsert);
+  watcher.on('change', upsert);
+  watcher.on('unlink', (relPath) => {
+    if (!isStl(relPath)) return;
+    files.delete(relPath);
+    broadcast();
+  });
+
   server.listen(port);
   return {
     server,
     port: () => server.address().port,
-    close: async () => { server.close(); },
+    close: async () => {
+      await watcher.close();
+      wss.close();
+      server.close();
+    },
   };
 }
 

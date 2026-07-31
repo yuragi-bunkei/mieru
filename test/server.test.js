@@ -64,3 +64,54 @@ test('rejects null byte in path without crashing the server', async (t) => {
   assert.strictEqual(index.status, 200);
   assert.match(index.body, /mieru/);
 });
+
+const WebSocket = require('ws');
+
+// 空のバイナリSTL（80byteヘッダ＋三角形数0）
+function emptyStl() {
+  const buf = Buffer.alloc(84);
+  buf.write('mieru test', 0);
+  buf.writeUInt32LE(0, 80);
+  return buf;
+}
+
+async function waitFor(cond, timeoutMs = 5000) {
+  const startT = Date.now();
+  while (!cond()) {
+    if (Date.now() - startT > timeoutMs) throw new Error('waitFor timeout');
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+test('watches stl files and pushes list over websocket', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-'));
+  const app = start({ watchDir: dir, port: 0 });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+
+  const ws = new WebSocket(`ws://127.0.0.1:${app.port()}`);
+  t.after(() => ws.close());
+  const messages = [];
+  ws.on('message', (data) => messages.push(JSON.parse(data)));
+  await new Promise((r) => ws.on('open', r));
+
+  // 接続直後に（空の）リストが届く
+  await waitFor(() => messages.length >= 1);
+  assert.strictEqual(messages[0].type, 'list');
+
+  // 非.stlファイルはリストに現れない
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'not an stl');
+
+  // STL追加 → リストに現れる
+  fs.writeFileSync(path.join(dir, 'part.stl'), emptyStl());
+  await waitFor(() => messages.some((m) => m.files.some((f) => f.path === 'part.stl')));
+  const listWithFile = messages[messages.length - 1];
+  const withFile = listWithFile.files.find((f) => f.path === 'part.stl');
+  assert.strictEqual(withFile.size, 84);
+  assert.ok(withFile.mtime > 0);
+  assert.ok(!listWithFile.files.some((f) => f.path === 'notes.txt'));
+
+  // STL削除 → リストから消える
+  fs.unlinkSync(path.join(dir, 'part.stl'));
+  await waitFor(() => messages[messages.length - 1].files.length === 0);
+});
