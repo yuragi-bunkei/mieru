@@ -76,7 +76,14 @@ function start({ watchDir, port = 5301 }) {
     }
   }
 
+  wss.on('error', (e) => {
+    console.error('mieru: websocket server error:', e.message);
+  });
+
   wss.on('connection', (ws) => {
+    ws.on('error', (e) => {
+      console.error('mieru: client socket error:', e.message);
+    });
     ws.send(JSON.stringify({ type: 'list', files: fileList() }));
   });
 
@@ -86,6 +93,9 @@ function start({ watchDir, port = 5301 }) {
     cwd: root,
     ignoreInitial: false,
     awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+  });
+  watcher.on('error', (e) => {
+    console.error('mieru: watcher error:', e.message);
   });
   function isStl(relPath) {
     return path.extname(relPath).toLowerCase() === '.stl';

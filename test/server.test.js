@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const net = require('node:net');
+const crypto = require('node:crypto');
 const { start, safeJoin } = require('../server.js');
 
 function get(port, urlPath) {
@@ -114,4 +116,70 @@ test('watches stl files and pushes list over websocket', async (t) => {
   // STL削除 → リストから消える
   fs.unlinkSync(path.join(dir, 'part.stl'));
   await waitFor(() => messages[messages.length - 1].files.length === 0);
+});
+
+// 生TCPでWebSocketハンドシェイクだけ行い、直後に不正なフレームを送って
+// 唐突にソケットを破壊するクライアントを模擬する。
+function performRawUpgrade(port) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => {
+      const key = crypto.randomBytes(16).toString('base64');
+      const req =
+        `GET / HTTP/1.1\r\n` +
+        `Host: 127.0.0.1:${port}\r\n` +
+        `Upgrade: websocket\r\n` +
+        `Connection: Upgrade\r\n` +
+        `Sec-WebSocket-Key: ${key}\r\n` +
+        `Sec-WebSocket-Version: 13\r\n\r\n`;
+      socket.write(req);
+    });
+    socket.on('error', () => {}); // クライアント側の後始末エラーは無視してよい
+    let gotUpgrade = false;
+    socket.on('data', (chunk) => {
+      if (!gotUpgrade && chunk.toString('utf8').includes('101')) {
+        gotUpgrade = true;
+        resolve(socket);
+      }
+    });
+    socket.on('close', () => {
+      if (!gotUpgrade) reject(new Error('socket closed before upgrade completed'));
+    });
+  });
+}
+
+test('survives a malformed websocket frame followed by an abrupt disconnect', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-'));
+  const app = start({ watchDir: dir, port: 0 });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  const socket = await performRawUpgrade(port);
+
+  // 不正なWebSocketフレーム（RSV2/RSV3ビットが立った不正ヘッダ）を送りつけ、
+  // サーバー側でプロトコルエラーを起こしたあと、応答を待たずに唐突に破壊する。
+  const garbage = Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+  socket.write(garbage);
+  await new Promise((r) => setTimeout(r, 50));
+  socket.destroy(new Error('boom-raw'));
+
+  // サーバーが異常切断を処理する猶予を与える
+  await new Promise((r) => setTimeout(r, 300));
+
+  // サーバーは生きていて、通常のリクエストに応答し続けなければならない
+  const index = await get(port, '/');
+  assert.strictEqual(index.status, 200);
+  assert.match(index.body, /mieru/);
+
+  // 新しいクライアントも接続でき、リストを受け取れる
+  const ws2 = new WebSocket(`ws://127.0.0.1:${port}`);
+  t.after(() => ws2.close());
+  const messages2 = [];
+  ws2.on('message', (data) => messages2.push(JSON.parse(data)));
+  await new Promise((resolve, reject) => {
+    ws2.once('open', resolve);
+    ws2.once('error', reject);
+  });
+  await waitFor(() => messages2.length >= 1);
+  assert.strictEqual(messages2[0].type, 'list');
 });
