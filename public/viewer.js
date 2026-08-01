@@ -210,6 +210,19 @@ document.getElementById('plate').onchange = (ev) => {
   plate.visible = ev.target.checked;
   render();
 };
+// 自動回転: ONの間だけrAFループを回す（通常はオンデマンド描画を維持）。
+// Browserペインがバックグラウンドの間はrAFが止まり回転も止まる（仕様）。
+document.getElementById('autorot').onchange = (ev) => {
+  controls.autoRotate = ev.target.checked;
+  if (controls.autoRotate) {
+    const loop = () => {
+      if (!controls.autoRotate) return;
+      controls.update();   // autoRotateが視点を進め、changeイベント経由でrenderされる
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+};
 clipAxisSel.onchange = applyClip;
 clipPosInput.oninput = applyClip;
 
