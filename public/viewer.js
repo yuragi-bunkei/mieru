@@ -42,6 +42,20 @@ grid.rotation.x = Math.PI / 2;
 plate.add(grid);
 scene.add(plate);
 
+// 座標軸: 原点を両方向に貫く直線（X赤・Y緑・Z青。Zは上下に貫通）
+const axes = new THREE.Group();
+function axisLine(dx, dy, dz, from, to, color) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(dx * from, dy * from, dz * from),
+    new THREE.Vector3(dx * to, dy * to, dz * to),
+  ]);
+  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
+}
+axes.add(axisLine(1, 0, 0, -100, 100, 0xe05555));
+axes.add(axisLine(0, 1, 0, -100, 100, 0x55b060));
+axes.add(axisLine(0, 0, 1, -40, 150, 0x4f8ef7));
+scene.add(axes);
+
 const entries = new Map(); // path -> {mesh, material, visible, color, mtime, error}
 // 単体表示は白、複数を並行表示するときだけパレット色で塗り分ける
 const SINGLE_COLOR = 0xf2f2f2;
@@ -218,6 +232,10 @@ document.getElementById('wire').onchange = (ev) => {
 };
 document.getElementById('plate').onchange = (ev) => {
   plate.visible = ev.target.checked;
+  render();
+};
+document.getElementById('axes').onchange = (ev) => {
+  axes.visible = ev.target.checked;
   render();
 };
 // 自動回転: ONの間だけrAFループを回す（通常はオンデマンド描画を維持）。
