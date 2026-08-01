@@ -13,6 +13,11 @@
   .err { color: #ffb454; }
   #canvas-wrap { flex: 1; position: relative; min-width: 0; }
   canvas { display: block; }
+  #anno { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+  #anno.active { pointer-events: auto; cursor: crosshair; }
+  #anno-hint { font-size: 11px; color: #9aa0a6; margin-top: 4px; }
+  .anno-input { position: absolute; z-index: 6; background: #23272d; color: #ff5252;
+    border: 1px solid #ff5252; font-size: 15px; padding: 2px 4px; }
   #dims { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; font-size: 13px; pointer-events: none; }
   #status { position: absolute; right: 10px; top: 10px; font-size: 12px; color: #9aa0a6; pointer-events: none; }
   .ctl { margin-top: 14px; border-top: 1px solid #3a3f46; padding-top: 10px; }
@@ -47,12 +52,25 @@
       </select>
       <input type="range" id="clip-pos" min="0" max="100" value="100">
     </div>
+    <div class="ctl">
+      <div>描き込み（Claudeへの指示）</div>
+      <label><input type="checkbox" id="anno-mode"> 描き込みモード</label>
+      <select id="anno-tool">
+        <option value="pen">ペン</option>
+        <option value="arrow">矢印</option>
+        <option value="text">文字</option>
+      </select>
+      <button id="anno-clear">消去</button>
+      <div id="anno-hint">描いたらClaudeに「画面を見て」と伝えてください</div>
+    </div>
   </div>
   <div id="canvas-wrap">
+    <canvas id="anno"></canvas>
     <div id="dims">—</div>
     <div id="status">接続中…</div>
   </div>
 </div>
 <script type="module" src="/viewer.js"></script>
+<script src="/annotate.js"></script>
 </body>
 </html>
