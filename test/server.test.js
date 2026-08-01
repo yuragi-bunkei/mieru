@@ -183,3 +183,43 @@ test('survives a malformed websocket frame followed by an abrupt disconnect', as
   await waitFor(() => messages2.length >= 1);
   assert.strictEqual(messages2[0].type, 'list');
 });
+
+test('watch endpoint reports and switches the watched directory', async (t) => {
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-a-'));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-b-'));
+  const app = start({ watchDir: dirA, port: 0 });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  // 現在の監視先を返す
+  const cur = await get(port, '/watch');
+  assert.strictEqual(cur.status, 200);
+  assert.strictEqual(JSON.parse(cur.body).dir, path.resolve(dirA));
+
+  // 存在しないディレクトリは400、監視先は変わらない
+  const bad = await get(port, '/watch?dir=' + encodeURIComponent('/no/such/dir-mieru'));
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(JSON.parse((await get(port, '/watch')).body).dir, path.resolve(dirA));
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  t.after(() => ws.close());
+  const messages = [];
+  ws.on('message', (data) => messages.push(JSON.parse(data)));
+  await new Promise((r) => ws.on('open', r));
+
+  // 切替成功
+  const ok = await get(port, '/watch?dir=' + encodeURIComponent(dirB));
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(JSON.parse(ok.body).dir, path.resolve(dirB));
+
+  // 新監視先のSTLがリストに現れ、/files で配信される
+  fs.writeFileSync(path.join(dirB, 'b.stl'), emptyStl());
+  await waitFor(() => messages.some((m) => m.files.some((f) => f.path === 'b.stl')));
+  assert.strictEqual((await get(port, '/files/b.stl')).status, 200);
+
+  // 旧監視先への書き込みは無視される
+  fs.writeFileSync(path.join(dirA, 'a.stl'), emptyStl());
+  await new Promise((r) => setTimeout(r, 600));
+  assert.ok(!messages.some((m) => m.files.some((f) => f.path === 'a.stl')));
+});

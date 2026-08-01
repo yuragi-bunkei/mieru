@@ -32,20 +32,42 @@ function sendFile(res, filePath) {
 }
 
 function start({ watchDir, port = 5301 }) {
-  const root = path.resolve(watchDir);
+  let root = path.resolve(watchDir);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     throw new Error(`監視ディレクトリが存在しません: ${root}`);
   }
 
   const server = http.createServer((req, res) => {
-    let pathname;
+    let url, pathname;
     try {
-      pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      url = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(url.pathname);
     } catch {
       res.writeHead(400); return res.end('bad request');
     }
     if (pathname.includes('\0')) {
       res.writeHead(400); return res.end('bad request');
+    }
+    if (pathname === '/watch') {
+      const dir = url.searchParams.get('dir');
+      if (!dir) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ dir: root }));
+      }
+      const target = path.resolve(dir);
+      let isDir = false;
+      try { isDir = fs.statSync(target).isDirectory(); } catch {}
+      if (!isDir) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: `監視ディレクトリが存在しません: ${target}` }));
+      }
+      switchWatch(target).then(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ dir: target }));
+      }).catch((e) => {
+        res.writeHead(500); res.end(String((e && e.message) || e));
+      });
+      return;
     }
     if (pathname === '/') return sendFile(res, path.join(PUBLIC_DIR, 'index.html'));
     if (pathname.startsWith('/vendor/three/')) {
@@ -87,16 +109,6 @@ function start({ watchDir, port = 5301 }) {
     ws.send(JSON.stringify({ type: 'list', files: fileList() }));
   });
 
-  // chokidar v5: globパターンは未サポートのため、rootディレクトリ自体を監視し
-  // イベント側で拡張子 .stl（大小文字問わず）にフィルタする。
-  const watcher = chokidar.watch(root, {
-    cwd: root,
-    ignoreInitial: false,
-    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
-  });
-  watcher.on('error', (e) => {
-    console.error('mieru: watcher error:', e.message);
-  });
   function isStl(relPath) {
     return path.extname(relPath).toLowerCase() === '.stl';
   }
@@ -112,13 +124,38 @@ function start({ watchDir, port = 5301 }) {
       broadcast();
     });
   }
-  watcher.on('add', upsert);
-  watcher.on('change', upsert);
-  watcher.on('unlink', (relPath) => {
-    if (!isStl(relPath)) return;
-    files.delete(relPath);
+
+  // chokidar v5: globパターンは未サポートのため、rootディレクトリ自体を監視し
+  // イベント側で拡張子 .stl（大小文字問わず）にフィルタする。
+  function attachWatcher() {
+    const w = chokidar.watch(root, {
+      cwd: root,
+      ignoreInitial: false,
+      awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
+    });
+    w.on('error', (e) => {
+      console.error('mieru: watcher error:', e.message);
+    });
+    w.on('add', upsert);
+    w.on('change', upsert);
+    w.on('unlink', (relPath) => {
+      if (!isStl(relPath)) return;
+      files.delete(relPath);
+      broadcast();
+    });
+    return w;
+  }
+  let watcher = attachWatcher();
+
+  // 監視先の実行時切替（/watch?dir=... から呼ばれる）
+  async function switchWatch(target) {
+    await watcher.close();
+    root = target;
+    files.clear();
     broadcast();
-  });
+    watcher = attachWatcher();
+    console.log(`mieru: 監視先を切替: ${root}`);
+  }
 
   server.listen(port);
   return {
