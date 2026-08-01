@@ -11,21 +11,16 @@ const filelistEl = document.getElementById('filelist');
 const clipAxisSel = document.getElementById('clip-axis');
 const clipPosInput = document.getElementById('clip-pos');
 
+const viewsEl = document.getElementById('views');
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.localClippingEnabled = true;
+renderer.domElement.id = 'gl';
+renderer.setClearColor(0x3a3f46);   // ビュー間の隙間＝区切り線の色
 wrap.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1a1d21);
-
-// 3Dプリントの慣習に合わせZ-up
-const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
-camera.up.set(0, 0, 1);
-camera.position.set(160, -160, 120);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0, 20);
-controls.addEventListener('change', render);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -72,15 +67,43 @@ let colorIdx = 0;
 let hasFit = false;
 const loader = new STLLoader();
 
+// マルチビュー: 1枚のキャンバスをシザーで分割し、視点ごとに描画する。
+// 複数アングルが1枚のスクリーンショットに収まるので、各ビューに描き込んだ
+// 指示をまとめてClaudeへ渡せる。
+// ラベルは「ビュー1…」の通し番号。各ビューは自由に回せるので、
+// 方角名にすると回した時点で嘘になる（初期の向きだけをdirで決める）。
+const PRESETS = {
+  iso: { dir: [1, -1, 0.8], up: [0, 0, 1] },
+  front: { dir: [0, -1, 0], up: [0, 0, 1] },
+  right: { dir: [1, 0, 0], up: [0, 0, 1] },
+  top: { dir: [0, 0, 1], up: [0, 1, 0] },
+};
+const LAYOUTS = { 1: ['iso'], 2: ['iso', 'front'], 4: ['iso', 'front', 'right', 'top'] };
+const views = [];
+
 // オンデマンド描画（rAF連続ループは使わない。Browserペインのバックグラウンド凍結対策）
-function render() { renderer.render(scene, camera); }
+function render() {
+  const wrapRect = wrap.getBoundingClientRect();
+  renderer.setScissorTest(false);
+  renderer.clear();                 // 隙間を区切り線の色で塗る
+  renderer.setScissorTest(true);
+  for (const v of views) {
+    const r = v.el.getBoundingClientRect();
+    const w = Math.floor(r.width), h = Math.floor(r.height);
+    if (w <= 0 || h <= 0) continue;
+    const left = Math.floor(r.left - wrapRect.left);
+    const bottom = Math.floor(wrapRect.bottom - r.bottom);   // WebGLは左下原点
+    renderer.setViewport(left, bottom, w, h);
+    renderer.setScissor(left, bottom, w, h);
+    v.camera.aspect = w / h;
+    v.camera.updateProjectionMatrix();
+    renderer.render(scene, v.camera);
+  }
+}
 
 function resize() {
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  renderer.setSize(w, h);
   renderer.setPixelRatio(window.devicePixelRatio);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   render();
 }
 window.addEventListener('resize', resize);
@@ -101,17 +124,56 @@ function updateDims() {
   dimsEl.textContent = `${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm`;
 }
 
-function fitView() {
+function frame(v, dir) {
   const box = visibleBBox();
-  if (!box) return;
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.y, size.z, 10);
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  camera.position.copy(center.clone().add(dir.multiplyScalar(radius * 2.2)));
-  controls.target.copy(center);
-  controls.update();
+  const center = box ? box.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 0, 20);
+  const radius = box
+    ? Math.max(...box.getSize(new THREE.Vector3()).toArray(), 10)
+    : 60;
+  v.camera.position.copy(center.clone().add(dir.clone().normalize().multiplyScalar(radius * 2.2)));
+  v.controls.target.copy(center);
+  v.controls.update();
+}
+
+// 全体表示: 各ビューの向きは保ったまま、モデル全体が入るように寄り引きする
+function fitView() {
+  for (const v of views) {
+    frame(v, v.camera.position.clone().sub(v.controls.target));
+  }
   render();
+}
+
+// 視点リセット: 各ビューをプリセット（斜め/正面/右/上）の向きに戻す
+function resetViews() {
+  for (const v of views) {
+    const p = PRESETS[v.key];
+    v.camera.up.set(...p.up);
+    frame(v, new THREE.Vector3(...p.dir));
+  }
+  render();
+}
+
+function buildViews(n) {
+  for (const v of views) v.controls.dispose();
+  views.length = 0;
+  viewsEl.textContent = '';
+  viewsEl.className = 'n' + n;
+  const autoRot = document.getElementById('autorot').checked;
+  LAYOUTS[n].forEach((key, i) => {
+    const el = document.createElement('div');
+    el.className = 'view';
+    const lab = document.createElement('div');
+    lab.className = 'view-label';
+    lab.textContent = 'ビュー' + (i + 1);
+    el.appendChild(lab);
+    viewsEl.appendChild(el);
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 5000);
+    const controls = new OrbitControls(camera, el);
+    controls.autoRotate = autoRot;
+    controls.addEventListener('change', render);
+    views.push({ el, camera, controls, key });
+  });
+  resetViews();
 }
 
 function applyClip() {
@@ -176,7 +238,7 @@ async function loadFile(f) {
     e.mesh.visible = e.visible;
     scene.add(e.mesh);
     e.error = null;
-    if (!hasFit) { hasFit = true; fitView(); }
+    if (!hasFit) { hasFit = true; resetViews(); }
   } catch (err) {
     // パース失敗（書き込み競合等）: 旧メッシュは残し、次のリスト受信で再試行
     e.error = String((err && err.message) || err);
@@ -224,6 +286,8 @@ function connect() {
 }
 
 document.getElementById('fit').onclick = fitView;
+document.getElementById('resetview').onclick = resetViews;
+document.getElementById('viewcount').onchange = (ev) => buildViews(Number(ev.target.value));
 document.getElementById('wire').onchange = (ev) => {
   for (const e of entries.values()) {
     if (e.material) e.material.wireframe = ev.target.checked;
@@ -241,11 +305,13 @@ document.getElementById('axes').onchange = (ev) => {
 // 自動回転: ONの間だけrAFループを回す（通常はオンデマンド描画を維持）。
 // Browserペインがバックグラウンドの間はrAFが止まり回転も止まる（仕様）。
 document.getElementById('autorot').onchange = (ev) => {
-  controls.autoRotate = ev.target.checked;
-  if (controls.autoRotate) {
+  const on = ev.target.checked;
+  for (const v of views) v.controls.autoRotate = on;
+  if (on) {
     const loop = () => {
-      if (!controls.autoRotate) return;
-      controls.update();   // autoRotateが視点を進め、changeイベント経由でrenderされる
+      if (!views.some((v) => v.controls.autoRotate)) return;
+      for (const v of views) v.controls.update();   // autoRotateが視点を進める
+      render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -254,5 +320,6 @@ document.getElementById('autorot').onchange = (ev) => {
 clipAxisSel.onchange = applyClip;
 clipPosInput.oninput = applyClip;
 
+buildViews(Number(document.getElementById('viewcount').value));
 resize();
 connect();

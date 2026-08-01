@@ -61,6 +61,22 @@
     return [e.clientX - r.left, e.clientY - r.top];
   }
 
+  // どのビューに描いているかを枠で示す（複数ビューのときだけ）
+  let lockedView = null;
+  function viewAt(e) {
+    for (const v of document.querySelectorAll('.view')) {
+      const r = v.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX <= r.right &&
+          e.clientY >= r.top && e.clientY <= r.bottom) return v;
+    }
+    return null;
+  }
+  function highlight(v) {
+    const all = document.querySelectorAll('.view');
+    const target = all.length > 1 ? v : null;
+    for (const el of all) el.classList.toggle('drawing', el === target);
+  }
+
   function placeTextInput(p) {
     const input = document.createElement('input');
     input.className = 'anno-input';
@@ -85,25 +101,33 @@
 
   cv.addEventListener('pointerdown', (e) => {
     const p = pos(e);
+    lockedView = viewAt(e);
+    highlight(lockedView);
     if (toolSel.value === 'text') { placeTextInput(p); return; }
     cur = toolSel.value === 'pen' ? { type: 'pen', pts: [p] } : { type: 'arrow', a: p, b: p };
-    cv.setPointerCapture(e.pointerId);
+    try { cv.setPointerCapture(e.pointerId); } catch {}
   });
   cv.addEventListener('pointermove', (e) => {
-    if (!cur) return;
+    if (!cur) { highlight(viewAt(e)); return; }   // 未描画時はホバー中のビューを枠表示
     const p = pos(e);
     if (cur.type === 'pen') cur.pts.push(p);
     else cur.b = p;
     redraw();
   });
-  cv.addEventListener('pointerup', () => {
+  cv.addEventListener('pointerup', (e) => {
+    lockedView = null;
+    highlight(viewAt(e));
     if (!cur) return;
     shapes.push(cur);
     cur = null;
     redraw();
   });
+  cv.addEventListener('pointerleave', () => { if (!cur) highlight(null); });
 
-  modeCb.onchange = () => cv.classList.toggle('active', modeCb.checked);
+  modeCb.onchange = () => {
+    cv.classList.toggle('active', modeCb.checked);
+    if (!modeCb.checked) highlight(null);
+  };
   clearBtn.onclick = () => { shapes.length = 0; redraw(); };
 
   resize();
