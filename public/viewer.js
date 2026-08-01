@@ -80,6 +80,7 @@ const PRESETS = {
 };
 const LAYOUTS = { 1: ['iso'], 2: ['iso', 'front'], 4: ['iso', 'front', 'right', 'top'] };
 const views = [];
+window.__views = views;   // 検証用フック
 
 // オンデマンド描画（rAF連続ループは使わない。Browserペインのバックグラウンド凍結対策）
 function render() {
@@ -101,9 +102,26 @@ function render() {
   }
 }
 
+// OrbitControlsの回転・パン量は domElement.clientHeight で正規化されるため、
+// 分割してペインが小さくなるほど過敏になる（4分割だと2倍速で、少し引くだけで
+// 極を越えて上下左右が反転して見える）。ビュー全体の高さを基準に正規化し直し、
+// 分割数によらず1画面と同じ操作感にする。
+function tuneControls() {
+  const ref = wrap.clientHeight || 800;
+  for (const v of views) {
+    const h = v.el.clientHeight || ref;
+    v.controls.rotateSpeed = h / ref;
+    v.controls.panSpeed = h / ref;
+    // 真上・真下（極）に張り付くと方位角が退化して操作不能になるので少し手前で止める
+    v.controls.minPolarAngle = 0.05;
+    v.controls.maxPolarAngle = Math.PI - 0.05;
+  }
+}
+
 function resize() {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+  tuneControls();
   render();
 }
 window.addEventListener('resize', resize);
@@ -173,6 +191,7 @@ function buildViews(n) {
     controls.addEventListener('change', render);
     views.push({ el, camera, controls, key });
   });
+  tuneControls();
   resetViews();
 }
 
