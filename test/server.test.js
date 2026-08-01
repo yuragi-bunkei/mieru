@@ -223,3 +223,20 @@ test('watch endpoint reports and switches the watched directory', async (t) => {
   await new Promise((r) => setTimeout(r, 600));
   assert.ok(!messages.some((m) => m.files.some((f) => f.path === 'a.stl')));
 });
+
+test('watch switch persists the directory to the state file', async (t) => {
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-sa-'));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-sb-'));
+  const stateFile = path.join(dirA, 'state.txt');
+  const app = start({ watchDir: dirA, port: 0, stateFile });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  const ok = await get(port, '/watch?dir=' + encodeURIComponent(dirB));
+  assert.strictEqual(ok.status, 200);
+  await waitFor(() => {
+    try { return fs.readFileSync(stateFile, 'utf8').trim() === path.resolve(dirB); }
+    catch { return false; }
+  });
+});

@@ -44,6 +44,16 @@ plate.add(new THREE.AxesHelper(20));
 scene.add(plate);
 
 const entries = new Map(); // path -> {mesh, material, visible, color, mtime, error}
+// 単体表示は白、複数を並行表示するときだけパレット色で塗り分ける
+const SINGLE_COLOR = 0xf2f2f2;
+function effColor(e) {
+  return entries.size === 1 ? SINGLE_COLOR : e.color;
+}
+function applyColors() {
+  for (const e of entries.values()) {
+    if (e.material) e.material.color.setHex(effColor(e));
+  }
+}
 let clipPlane = null;
 let colorIdx = 0;
 let hasFit = false;
@@ -109,6 +119,7 @@ function applyClip() {
 }
 
 function renderSidebar() {
+  applyColors();
   filelistEl.textContent = '';
   if (entries.size === 0) { filelistEl.textContent = '（STL待機中…）'; return; }
   for (const [p, e] of [...entries.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -124,7 +135,7 @@ function renderSidebar() {
     };
     const sw = document.createElement('span');
     sw.className = 'swatch';
-    sw.style.background = '#' + e.color.toString(16).padStart(6, '0');
+    sw.style.background = '#' + effColor(e).toString(16).padStart(6, '0');
     label.append(cb, sw, document.createTextNode(p + (e.error ? ' ⚠' : '')));
     if (e.error) { label.classList.add('err'); label.title = e.error; }
     filelistEl.append(label);
@@ -143,7 +154,7 @@ async function loadFile(f) {
     if (e.mesh) { scene.remove(e.mesh); e.mesh.geometry.dispose(); }
     if (!e.material) {
       e.material = new THREE.MeshStandardMaterial({
-        color: e.color, roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide,
+        color: effColor(e), roughness: 0.6, metalness: 0.05, side: THREE.DoubleSide,
         wireframe: document.getElementById('wire').checked,
         clippingPlanes: clipPlane ? [clipPlane] : [],
       });

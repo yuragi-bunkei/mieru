@@ -31,7 +31,9 @@ function sendFile(res, filePath) {
   });
 }
 
-function start({ watchDir, port = 5301 }) {
+const DEFAULT_STATE_FILE = path.join(__dirname, '.last-watch');
+
+function start({ watchDir, port = 5301, stateFile = DEFAULT_STATE_FILE }) {
   let root = path.resolve(watchDir);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     throw new Error(`監視ディレクトリが存在しません: ${root}`);
@@ -147,13 +149,16 @@ function start({ watchDir, port = 5301 }) {
   }
   let watcher = attachWatcher();
 
-  // 監視先の実行時切替（/watch?dir=... から呼ばれる）
+  // 監視先の実行時切替（/watch?dir=... から呼ばれる）。次回起動の --last 用に永続化
   async function switchWatch(target) {
     await watcher.close();
     root = target;
     files.clear();
     broadcast();
     watcher = attachWatcher();
+    fs.writeFile(stateFile, root, (err) => {
+      if (err) console.error('mieru: 監視先の保存に失敗:', err.message);
+    });
     console.log(`mieru: 監視先を切替: ${root}`);
   }
 
@@ -175,9 +180,18 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   let watchDir = process.cwd();
   let port = 5301;
+  let useLast = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port') { port = Number(args[++i]); }
+    else if (args[i] === '--last') { useLast = true; }
     else { watchDir = args[i]; }
+  }
+  if (useLast) {
+    // 前回 /watch で切り替えた監視先が生きていれば復元（なければ引数/カレント）
+    try {
+      const saved = fs.readFileSync(DEFAULT_STATE_FILE, 'utf8').trim();
+      if (saved && fs.statSync(saved).isDirectory()) watchDir = saved;
+    } catch {}
   }
   const app = start({ watchDir, port });
   app.server.on('listening', () => {
