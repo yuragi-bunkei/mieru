@@ -40,7 +40,6 @@ const plate = new THREE.Group();
 const grid = new THREE.GridHelper(180, 18, 0x555b63, 0x33383f);
 grid.rotation.x = Math.PI / 2;
 plate.add(grid);
-plate.add(new THREE.AxesHelper(20));
 scene.add(plate);
 
 const entries = new Map(); // path -> {mesh, material, visible, color, mtime, error}
