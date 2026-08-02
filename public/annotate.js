@@ -7,9 +7,108 @@
   const modeCb = document.getElementById('anno-mode');
   const toolSel = document.getElementById('anno-tool');
   const clearBtn = document.getElementById('anno-clear');
+  const listEl = document.getElementById('anno-list');
+  const copyBtn = document.getElementById('anno-copy');
   const COLOR = '#ff5252';
-  const shapes = []; // {type:'pen',pts} | {type:'arrow',a,b} | {type:'text',p,str}
+  // shapes: {type:'pen',pts} | {type:'arrow',a,b} | {type:'text',p,str}
+  // 指摘リスト用に各要素へ id/label/memo/checked を付与する（commitShapeで付与）
+  const shapes = [];
   let cur = null;
+  let nextId = 1;
+  let seq = 0; // ペン/矢印の連番（「指摘1」等）
+
+  function typeLabel(t) {
+    return t === 'pen' ? 'ペン' : t === 'arrow' ? '矢印' : 'テキスト';
+  }
+
+  // 確定した注釈にリスト用メタデータを付けてshapesへ追加する
+  function commitShape(s) {
+    s.id = nextId++;
+    s.memo = '';
+    s.checked = false;
+    if (s.type === 'text') {
+      s.label = s.str;
+    } else {
+      seq += 1;
+      s.label = '指摘' + seq;
+    }
+    shapes.push(s);
+    redraw();
+    renderList();
+  }
+
+  function renderList() {
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (shapes.length === 0) {
+      const empty = document.createElement('div');
+      empty.id = 'anno-empty';
+      empty.textContent = '（まだ指摘はありません）';
+      listEl.appendChild(empty);
+      if (copyBtn) copyBtn.disabled = true;
+      return;
+    }
+    if (copyBtn) copyBtn.disabled = false;
+    shapes.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'anno-item' + (s.checked ? ' done' : '');
+      row.dataset.id = s.id;
+
+      const head = document.createElement('div');
+      head.className = 'anno-item-head';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!s.checked;
+      cb.onchange = () => {
+        s.checked = cb.checked;
+        row.classList.toggle('done', cb.checked);
+      };
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'anno-label';
+      labelSpan.textContent = `${i + 1}. ${s.label}（${typeLabel(s.type)}）`;
+      head.append(cb, labelSpan);
+
+      const memoInput = document.createElement('input');
+      memoInput.type = 'text';
+      memoInput.className = 'anno-memo';
+      memoInput.placeholder = 'メモ（任意）';
+      memoInput.value = s.memo || '';
+      memoInput.oninput = () => { s.memo = memoInput.value; };
+
+      row.append(head, memoInput);
+      listEl.appendChild(row);
+    });
+  }
+
+  function toMarkdown() {
+    return shapes.map((s) => {
+      const box = s.checked ? '[x]' : '[ ]';
+      const memo = s.memo && s.memo.trim() ? ` — ${s.memo.trim()}` : '';
+      return `- ${box} ${s.label}（${typeLabel(s.type)}）${memo}`;
+    }).join('\n');
+  }
+
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      const md = toMarkdown();
+      if (!md) return;
+      try {
+        await navigator.clipboard.writeText(md);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = md;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch {}
+        ta.remove();
+      }
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = 'コピーしました';
+      setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+    };
+  }
 
   function resize() {
     cv.width = wrap.clientWidth * devicePixelRatio;
@@ -88,9 +187,10 @@
     const commit = () => {
       if (done) return;
       done = true;
-      if (input.value.trim()) shapes.push({ type: 'text', p: [p[0], p[1] + 4], str: input.value.trim() });
+      const val = input.value.trim();
       input.remove();
-      redraw();
+      if (val) commitShape({ type: 'text', p: [p[0], p[1] + 4], str: val });
+      else redraw();
     };
     input.onkeydown = (ev) => {
       if (ev.key === 'Enter') commit();
@@ -118,9 +218,8 @@
     lockedView = null;
     highlight(viewAt(e));
     if (!cur) return;
-    shapes.push(cur);
+    commitShape(cur);
     cur = null;
-    redraw();
   });
   cv.addEventListener('pointerleave', () => { if (!cur) highlight(null); });
 
@@ -128,7 +227,13 @@
     cv.classList.toggle('active', modeCb.checked);
     if (!modeCb.checked) highlight(null);
   };
-  clearBtn.onclick = () => { shapes.length = 0; redraw(); };
+  clearBtn.onclick = () => {
+    shapes.length = 0;
+    seq = 0;
+    redraw();
+    renderList();
+  };
 
+  renderList();
   resize();
 })();

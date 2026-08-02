@@ -29,6 +29,19 @@
   #anno-hint { font-size: 11px; color: #9aa0a6; margin-top: 4px; }
   .anno-input { position: absolute; z-index: 6; background: #23272d; color: #ff5252;
     border: 1px solid #ff5252; font-size: 15px; padding: 2px 4px; }
+  #anno-list { max-height: 220px; overflow-y: auto; margin-top: 4px; }
+  #anno-empty { color: #9aa0a6; font-size: 12px; }
+  .anno-item { padding: 5px 0; border-bottom: 1px solid #3a3f46; }
+  .anno-item:last-child { border-bottom: 0; }
+  .anno-item-head { display: flex; align-items: center; gap: 6px; }
+  .anno-item-head input[type=checkbox] { flex: none; margin: 0; }
+  .anno-label { font-size: 12px; word-break: break-all; }
+  .anno-item.done .anno-label { text-decoration: line-through; color: #6b7076; }
+  .anno-memo { display: block; width: 100%; margin-top: 3px; box-sizing: border-box;
+    background: #1a1d21; color: #e8e8e8; border: 1px solid #3a3f46; border-radius: 4px;
+    padding: 3px 5px; font-size: 12px; }
+  #anno-copy { margin-top: 6px; width: 100%; }
+  #anno-copy:disabled { opacity: .5; cursor: default; }
   #dims { position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px; font-size: 13px; pointer-events: none; z-index: 6; }
   #status { position: absolute; right: 10px; top: 10px; font-size: 12px; color: #9aa0a6; pointer-events: none; z-index: 6; }
   .ctl { margin-top: 14px; border-top: 1px solid #3a3f46; padding-top: 10px; }
@@ -84,6 +97,11 @@
       </select>
       <button id="anno-clear">消去</button>
       <div id="anno-hint">描いたらClaudeに「画面を見て」と伝えてください</div>
+    </div>
+    <div class="ctl">
+      <div>指摘リスト</div>
+      <div id="anno-list"><div id="anno-empty">（まだ指摘はありません）</div></div>
+      <button id="anno-copy" disabled>Markdownコピー</button>
     </div>
   </div>
   <div id="canvas-wrap">
