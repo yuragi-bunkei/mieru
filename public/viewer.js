@@ -171,6 +171,65 @@ function resetViews() {
   render();
 }
 
+// 十字ボタン: 押している間だけそのビューの視点が回る。マウスドラッグより
+// 狙った角度に合わせやすい。回転はOrbitControlsと同じ球面座標系で行い、
+// 極（真上・真下）の手前でクランプして反転を防ぐ。
+const DPAD_SPEED = 1.4;   // rad/s
+function rotateView(v, dTheta, dPhi) {
+  const offset = v.camera.position.clone().sub(v.controls.target);
+  // camera.up を Y+ に合わせる座標系で球面座標に変換（OrbitControlsと同じ手法）
+  const quat = new THREE.Quaternion().setFromUnitVectors(v.camera.up, new THREE.Vector3(0, 1, 0));
+  offset.applyQuaternion(quat);
+  const sph = new THREE.Spherical().setFromVector3(offset);
+  sph.theta += dTheta;
+  sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi + dPhi));
+  offset.setFromSpherical(sph);
+  offset.applyQuaternion(quat.clone().invert());
+  v.camera.position.copy(v.controls.target).add(offset);
+  v.camera.lookAt(v.controls.target);
+  v.controls.update();
+}
+
+function makeDpad(v) {
+  const pad = document.createElement('div');
+  pad.className = 'dpad';
+  // [表示, グリッド列, 行, theta方向, phi方向]
+  const DIRS = [
+    ['▲', 2, 1, 0, -1],
+    ['◀', 1, 2, +1, 0],
+    ['▶', 3, 2, -1, 0],
+    ['▼', 2, 3, 0, +1],
+  ];
+  for (const [glyph, col, row, dt, dp] of DIRS) {
+    const b = document.createElement('button');
+    b.textContent = glyph;
+    b.style.gridColumn = col;
+    b.style.gridRow = row;
+    b.addEventListener('pointerdown', (ev) => {
+      // OrbitControlsのドラッグ開始に化けないよう遮断
+      ev.stopPropagation();
+      ev.preventDefault();
+      try { b.setPointerCapture(ev.pointerId); } catch { /* 合成イベント等でIDが無効でも回転は動かす */ }
+      let active = true;
+      let last = performance.now();
+      const stop = () => { active = false; };
+      b.addEventListener('pointerup', stop, { once: true });
+      b.addEventListener('pointercancel', stop, { once: true });
+      const loop = (now) => {
+        if (!active) return;
+        const dtSec = Math.min((now - last) / 1000, 0.05);
+        last = now;
+        rotateView(v, dt * DPAD_SPEED * dtSec, dp * DPAD_SPEED * dtSec);
+        render();
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    });
+    pad.appendChild(b);
+  }
+  return pad;
+}
+
 function buildViews(n) {
   for (const v of views) v.controls.dispose();
   views.length = 0;
@@ -189,7 +248,9 @@ function buildViews(n) {
     const controls = new OrbitControls(camera, el);
     controls.autoRotate = autoRot;
     controls.addEventListener('change', render);
-    views.push({ el, camera, controls, key });
+    const v = { el, camera, controls, key };
+    el.appendChild(makeDpad(v));
+    views.push(v);
   });
   tuneControls();
   resetViews();
