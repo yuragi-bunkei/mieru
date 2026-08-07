@@ -179,7 +179,7 @@ module.exports = { start, safeJoin };
 if (require.main === module) {
   const args = process.argv.slice(2);
   let watchDir = process.cwd();
-  let port = 5301;
+  let port = Number(process.env.PORT) || 5301;
   let useLast = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port') { port = Number(args[++i]); }
