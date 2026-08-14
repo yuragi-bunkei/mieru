@@ -1,0 +1,13 @@
+{
+  "name": "clamp-adapter",
+  "private": true,
+  "version": "1.0.0",
+  "description": "市販クランプ式トレイを厚い天板＋幕板のデスクに付けるアダプタのSTLジェネレータ",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "manifold-3d": "^3.5.1"
+  }
+}
