@@ -1,6 +1,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { WebSocketServer } = require('ws');
 const chokidar = require('chokidar');
 
@@ -32,11 +33,43 @@ function sendFile(res, filePath) {
 }
 
 const DEFAULT_STATE_FILE = path.join(__dirname, '.last-watch');
+const DEFAULT_UI_STATE_DIR = path.join(__dirname, '.ui-state');
+const UI_STATE_BODY_LIMIT = 5 * 1024 * 1024;
 
-function start({ watchDir, port = 5301, stateFile = DEFAULT_STATE_FILE }) {
+function start({ watchDir, port = 5301, stateFile = DEFAULT_STATE_FILE, uiStateDir = DEFAULT_UI_STATE_DIR }) {
   let root = path.resolve(watchDir);
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     throw new Error(`監視ディレクトリが存在しません: ${root}`);
+  }
+
+  // ブラウザ側UI状態（カメラ・表示設定・描き込み等）の永続化。ページ再読込や
+  // サーバー再起動をまたいで「見ていた状態」へ戻せるようにする。
+  // 監視ディレクトリごとに別ファイルへ保存する（単一JSONの丸ごと書き戻しだと、
+  // 並行起動した複数インスタンスが互いのプロジェクトの状態を消してしまう）。
+  // 書き込みはtmp+renameのアトミック方式で、読み手が壊れたJSONを見ないようにする。
+  let uiTmpSeq = 0;
+  function uiStatePathFor(dir) {
+    const hash = crypto.createHash('sha1').update(dir).digest('hex');
+    return path.join(uiStateDir, hash + '.json');
+  }
+  function readUiState(cb) {
+    fs.readFile(uiStatePathFor(root), 'utf8', (err, data) => {
+      if (err) return cb(null);
+      try { cb(JSON.parse(data).state ?? null); } catch { cb(null); }
+    });
+  }
+  function writeUiState(state, cb) {
+    const target = uiStatePathFor(root);
+    const tmp = `${target}.tmp-${process.pid}-${uiTmpSeq++}`;
+    // どのプロジェクトのファイルか分かるよう、監視ディレクトリのパスも一緒に残す
+    const payload = JSON.stringify({ dir: root, state });
+    fs.mkdir(uiStateDir, { recursive: true }, (mkErr) => {
+      if (mkErr) return cb(mkErr);
+      fs.writeFile(tmp, payload, (wErr) => {
+        if (wErr) return cb(wErr);
+        fs.rename(tmp, target, cb);
+      });
+    });
   }
 
   const server = http.createServer((req, res) => {
@@ -68,6 +101,46 @@ function start({ watchDir, port = 5301, stateFile = DEFAULT_STATE_FILE }) {
         res.end(JSON.stringify({ dir: target }));
       }).catch((e) => {
         res.writeHead(500); res.end(String((e && e.message) || e));
+      });
+      return;
+    }
+    if (pathname === '/state') {
+      if (req.method === 'POST') {
+        let body = '';
+        let overflow = false;
+        req.on('data', (chunk) => {
+          if (overflow) return;
+          body += chunk;
+          if (body.length > UI_STATE_BODY_LIMIT) {
+            overflow = true;
+            body = '';
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'state too large' }));
+          }
+        });
+        req.on('end', () => {
+          if (overflow) return;
+          let state;
+          try { state = JSON.parse(body); } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ error: 'invalid json' }));
+          }
+          writeUiState(state, (err) => {
+            if (err) {
+              console.error('mieru: UI状態の保存に失敗:', err.message);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              return res.end(JSON.stringify({ error: 'save failed' }));
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+          });
+        });
+        req.on('error', () => {});
+        return;
+      }
+      readUiState((state) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ dir: root, state }));
       });
       return;
     }

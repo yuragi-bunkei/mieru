@@ -67,6 +67,12 @@ let colorIdx = 0;
 let hasFit = false;
 const loader = new STLLoader();
 
+// UI状態復元用: 復元直後はメッシュ未ロードで断面位置を計算できないため、
+// 最初のSTLロード後に一度だけapplyClipし直す
+let clipRestorePending = false;
+// 復元したファイル別表示状態（エントリ生成時に参照）
+let savedFileVisibility = null;
+
 // マルチビュー: 1枚のキャンバスをシザーで分割し、視点ごとに描画する。
 // 複数アングルが1枚のスクリーンショットに収まるので、各ビューに描き込んだ
 // 指示をまとめてClaudeへ渡せる。
@@ -188,6 +194,7 @@ function rotateView(v, dTheta, dPhi) {
   v.camera.position.copy(v.controls.target).add(offset);
   v.camera.lookAt(v.controls.target);
   v.controls.update();
+  scheduleSave();
 }
 
 function makeDpad(v) {
@@ -248,6 +255,7 @@ function buildViews(n) {
     const controls = new OrbitControls(camera, el);
     controls.autoRotate = autoRot;
     controls.addEventListener('change', render);
+    controls.addEventListener('change', scheduleSave);
     const v = { el, camera, controls, key };
     el.appendChild(makeDpad(v));
     views.push(v);
@@ -287,6 +295,7 @@ function renderSidebar() {
       if (e.mesh) e.mesh.visible = e.visible;
       updateDims();
       applyClip();
+      scheduleSave();
     };
     const sw = document.createElement('span');
     sw.className = 'swatch';
@@ -319,6 +328,7 @@ async function loadFile(f) {
     scene.add(e.mesh);
     e.error = null;
     if (!hasFit) { hasFit = true; resetViews(); }
+    if (clipRestorePending) { clipRestorePending = false; applyClip(); }
   } catch (err) {
     // パース失敗（書き込み競合等）: 旧メッシュは残し、次のリスト受信で再試行
     e.error = String((err && err.message) || err);
@@ -335,7 +345,9 @@ function handleList(files) {
     seen.add(f.path);
     let e = entries.get(f.path);
     if (!e) {
-      e = { mesh: null, material: null, visible: true, color: PALETTE[colorIdx++ % PALETTE.length], mtime: -2, error: null };
+      const vis = savedFileVisibility && f.path in savedFileVisibility
+        ? !!savedFileVisibility[f.path] : true;
+      e = { mesh: null, material: null, visible: vis, color: PALETTE[colorIdx++ % PALETTE.length], mtime: -2, error: null };
       entries.set(f.path, e);
     }
     if (f.mtime !== e.mtime) loadFile(f);
@@ -400,6 +412,113 @@ document.getElementById('autorot').onchange = (ev) => {
 clipAxisSel.onchange = applyClip;
 clipPosInput.oninput = applyClip;
 
-buildViews(Number(document.getElementById('viewcount').value));
-resize();
-connect();
+// ---- UI状態の保存・復元 ----
+// カメラ・ビュー分割・表示設定・描き込みをサーバーへ自動保存（デバウンス）し、
+// ページを開いたときに自動復元する。セッション中断でBrowserペインが閉じても、
+// 次に開けば見ていた状態に戻る。保存先は監視ディレクトリ別（server.jsの/state）。
+
+function captureState() {
+  return {
+    viewcount: Number(document.getElementById('viewcount').value),
+    cameras: views.map((v) => ({
+      pos: v.camera.position.toArray(),
+      target: v.controls.target.toArray(),
+      up: v.camera.up.toArray(),
+    })),
+    files: Object.fromEntries([...entries].map(([p, e]) => [p, e.visible])),
+    wire: document.getElementById('wire').checked,
+    plate: document.getElementById('plate').checked,
+    axes: document.getElementById('axes').checked,
+    autorot: document.getElementById('autorot').checked,
+    clip: { axis: clipAxisSel.value, pos: Number(clipPosInput.value) },
+    anno: window.__annoState ? window.__annoState.get() : null,
+  };
+}
+
+let saveTimer = null;
+let restoring = false;
+function scheduleSave() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fetch('/state', { method: 'POST', body: JSON.stringify(captureState()) }).catch(() => {});
+  }, 500);
+}
+// ペイン閉鎖・タブ切替時はデバウンスを待たずに送る（sendBeaconはアンロード中も届く）
+function flushSave() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  try { navigator.sendBeacon('/state', JSON.stringify(captureState())); } catch {}
+}
+window.addEventListener('pagehide', flushSave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSave();
+});
+
+for (const id of ['viewcount', 'wire', 'plate', 'axes', 'autorot', 'clip-axis']) {
+  document.getElementById(id).addEventListener('change', scheduleSave);
+}
+clipPosInput.addEventListener('input', scheduleSave);
+if (window.__annoState) window.__annoState.onChange(scheduleSave);
+
+async function restoreState() {
+  const res = await fetch('/state');
+  const { state } = await res.json();
+  if (!state || typeof state !== 'object') return false;
+  restoring = true;
+  try {
+    // チェックボックス類（buildViewsがautorotを読むため先に反映）
+    for (const id of ['wire', 'plate', 'axes', 'autorot']) {
+      if (typeof state[id] === 'boolean') document.getElementById(id).checked = state[id];
+    }
+    plate.visible = document.getElementById('plate').checked;
+    axes.visible = document.getElementById('axes').checked;
+
+    // ビュー分割とカメラ
+    const n = LAYOUTS[state.viewcount] ? state.viewcount : 1;
+    document.getElementById('viewcount').value = String(n);
+    buildViews(n);
+    const cams = Array.isArray(state.cameras) ? state.cameras : [];
+    cams.forEach((c, i) => {
+      const v = views[i];
+      if (!v || !c) return;
+      if (Array.isArray(c.up)) v.camera.up.fromArray(c.up);
+      if (Array.isArray(c.pos)) v.camera.position.fromArray(c.pos);
+      if (Array.isArray(c.target)) v.controls.target.fromArray(c.target);
+      v.camera.lookAt(v.controls.target);
+      v.controls.update();
+    });
+    // 復元したカメラを初回STLロードのresetViewsで潰さない
+    if (cams.length > 0) hasFit = true;
+
+    // ファイル別表示（エントリはWebSocketのリスト受信時に作られるので参照用に保持）
+    if (state.files && typeof state.files === 'object') savedFileVisibility = state.files;
+
+    // 断面（位置はメッシュのバウンディングボックス依存なので初回ロード後に適用）
+    if (state.clip && typeof state.clip === 'object') {
+      clipAxisSel.value = ['x', 'y', 'z'].includes(state.clip.axis) ? state.clip.axis : '';
+      const pos = Number(state.clip.pos);
+      if (Number.isFinite(pos)) clipPosInput.value = String(Math.max(0, Math.min(100, pos)));
+      if (clipAxisSel.value) clipRestorePending = true;
+    }
+
+    // 描き込み・指摘リスト
+    if (state.anno && window.__annoState) window.__annoState.set(state.anno);
+  } finally {
+    restoring = false;
+  }
+  // 自動回転はrAFループの起動が要るので既存ハンドラを発火させる
+  if (document.getElementById('autorot').checked) {
+    document.getElementById('autorot').dispatchEvent(new Event('change'));
+  }
+  render();
+  return true;
+}
+
+(async () => {
+  let restored = false;
+  try { restored = await restoreState(); } catch {}
+  if (!restored) buildViews(Number(document.getElementById('viewcount').value));
+  resize();
+  connect();
+})();

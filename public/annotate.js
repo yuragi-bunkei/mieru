@@ -16,6 +16,8 @@
   let cur = null;
   let nextId = 1;
   let seq = 0; // ペン/矢印の連番（「指摘1」等）
+  let onChangeCb = null; // viewer.jsの状態保存へ変更を通知する
+  function notifyChange() { if (onChangeCb) onChangeCb(); }
 
   function typeLabel(t) {
     return t === 'pen' ? 'ペン' : t === 'arrow' ? '矢印' : 'テキスト';
@@ -35,6 +37,7 @@
     shapes.push(s);
     redraw();
     renderList();
+    notifyChange();
   }
 
   function renderList() {
@@ -62,6 +65,7 @@
       cb.onchange = () => {
         s.checked = cb.checked;
         row.classList.toggle('done', cb.checked);
+        notifyChange();
       };
       const labelSpan = document.createElement('span');
       labelSpan.className = 'anno-label';
@@ -73,7 +77,7 @@
       memoInput.className = 'anno-memo';
       memoInput.placeholder = 'メモ（任意）';
       memoInput.value = s.memo || '';
-      memoInput.oninput = () => { s.memo = memoInput.value; };
+      memoInput.oninput = () => { s.memo = memoInput.value; notifyChange(); };
 
       row.append(head, memoInput);
       listEl.appendChild(row);
@@ -232,6 +236,43 @@
     seq = 0;
     redraw();
     renderList();
+    notifyChange();
+  };
+
+  // 描き込み状態の保存・復元フック（viewer.jsのUI状態永続化から使う）。
+  // 座標はCSSピクセルなので、保存時のキャンバスサイズも持ち、復元時に比率で合わせる。
+  window.__annoState = {
+    get() {
+      return { shapes, nextId, seq, size: [wrap.clientWidth, wrap.clientHeight] };
+    },
+    set(data) {
+      if (!data || !Array.isArray(data.shapes)) return;
+      const [ow, oh] = Array.isArray(data.size) ? data.size : [];
+      const sx = ow > 0 ? wrap.clientWidth / ow : 1;
+      const sy = oh > 0 ? wrap.clientHeight / oh : 1;
+      shapes.length = 0;
+      for (const s of data.shapes) {
+        let c;
+        try { c = JSON.parse(JSON.stringify(s)); } catch { continue; }
+        if (!c || typeof c !== 'object') continue;
+        if (c.type === 'pen' && Array.isArray(c.pts)) {
+          c.pts = c.pts.map(([x, y]) => [x * sx, y * sy]);
+        } else if (c.type === 'arrow' && Array.isArray(c.a) && Array.isArray(c.b)) {
+          c.a = [c.a[0] * sx, c.a[1] * sy];
+          c.b = [c.b[0] * sx, c.b[1] * sy];
+        } else if (c.type === 'text' && Array.isArray(c.p)) {
+          c.p = [c.p[0] * sx, c.p[1] * sy];
+        } else {
+          continue;
+        }
+        shapes.push(c);
+      }
+      nextId = Number(data.nextId) || shapes.length + 1;
+      seq = Number(data.seq) || 0;
+      redraw();
+      renderList();
+    },
+    onChange(cb) { onChangeCb = cb; },
   };
 
   renderList();

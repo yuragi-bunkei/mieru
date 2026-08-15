@@ -187,7 +187,8 @@ test('survives a malformed websocket frame followed by an abrupt disconnect', as
 test('watch endpoint reports and switches the watched directory', async (t) => {
   const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-a-'));
   const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-b-'));
-  const app = start({ watchDir: dirA, port: 0 });
+  // stateFileを渡さないと本物の .last-watch を上書きしてしまう
+  const app = start({ watchDir: dirA, port: 0, stateFile: path.join(dirA, 'state.txt') });
   t.after(() => app.close());
   await new Promise((r) => app.server.on('listening', r));
   const port = app.port();
@@ -222,6 +223,131 @@ test('watch endpoint reports and switches the watched directory', async (t) => {
   fs.writeFileSync(path.join(dirA, 'a.stl'), emptyStl());
   await new Promise((r) => setTimeout(r, 600));
   assert.ok(!messages.some((m) => m.files.some((f) => f.path === 'a.stl')));
+});
+
+function post(port, urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port, path: urlPath, method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    // 巨大ボディの途中でサーバーが応答を返した場合のEPIPE等は失敗にしない
+    req.on('error', (e) => setImmediate(() => reject(e)));
+    req.end(body);
+  });
+}
+
+test('ui state round-trips and is keyed per watch directory', async (t) => {
+  const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-ua-'));
+  const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-ub-'));
+  const uiStateDir = path.join(dirA, 'ui-state');
+  const app = start({ watchDir: dirA, port: 0, stateFile: path.join(dirA, 'state.txt'), uiStateDir });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  // 初期状態はnull
+  const empty = await get(port, '/state');
+  assert.strictEqual(empty.status, 200);
+  assert.deepStrictEqual(JSON.parse(empty.body), { dir: path.resolve(dirA), state: null });
+
+  // 保存 → 取得で往復する
+  const stateA = { viewcount: 2, wire: true };
+  const saved = await post(port, '/state', JSON.stringify(stateA));
+  assert.strictEqual(saved.status, 200);
+  assert.deepStrictEqual(JSON.parse((await get(port, '/state')).body).state, stateA);
+
+  // 監視先を切り替えると別キーになる（Aの状態はBに漏れない）
+  await get(port, '/watch?dir=' + encodeURIComponent(dirB));
+  assert.strictEqual(JSON.parse((await get(port, '/state')).body).state, null);
+  const stateB = { viewcount: 4 };
+  await post(port, '/state', JSON.stringify(stateB));
+
+  // Aへ戻るとAの状態が残っている
+  await get(port, '/watch?dir=' + encodeURIComponent(dirA));
+  assert.deepStrictEqual(JSON.parse((await get(port, '/state')).body).state, stateA);
+});
+
+test('ui state survives a server restart via the ui state dir', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-ur-'));
+  const uiStateDir = path.join(dir, 'ui-state');
+  const stateFile = path.join(dir, 'state.txt');
+
+  const app1 = start({ watchDir: dir, port: 0, stateFile, uiStateDir });
+  await new Promise((r) => app1.server.on('listening', r));
+  const state = { viewcount: 4, clip: { axis: 'z', pos: 40 } };
+  await post(app1.port(), '/state', JSON.stringify(state));
+  // 書き込みは非同期なので、GETで読めるまで待つ
+  await waitFor(() => fs.existsSync(uiStateDir) && fs.readdirSync(uiStateDir).some((f) => f.endsWith('.json')));
+  await app1.close();
+
+  const app2 = start({ watchDir: dir, port: 0, stateFile, uiStateDir });
+  t.after(() => app2.close());
+  await new Promise((r) => app2.server.on('listening', r));
+  assert.deepStrictEqual(JSON.parse((await get(app2.port(), '/state')).body).state, state);
+});
+
+// 並行PJシナリオ: 別ディレクトリを監視する2つのサーバーインスタンスが
+// 同じ保存先を共有しても、互いの状態を消さない
+test('two concurrent instances on different projects do not clobber each other', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-cc-'));
+  const dirA = path.join(base, 'projA');
+  const dirB = path.join(base, 'projB');
+  fs.mkdirSync(dirA);
+  fs.mkdirSync(dirB);
+  const uiStateDir = path.join(base, 'ui-state');
+
+  const appA = start({ watchDir: dirA, port: 0, stateFile: path.join(base, 'sa.txt'), uiStateDir });
+  const appB = start({ watchDir: dirB, port: 0, stateFile: path.join(base, 'sb.txt'), uiStateDir });
+  t.after(() => appA.close());
+  t.after(() => appB.close());
+  // listeningは待ち始める前に発火しうるので、リスナーを先に両方登録してから待つ
+  const readyA = new Promise((r) => appA.server.on('listening', r));
+  const readyB = new Promise((r) => appB.server.on('listening', r));
+  await readyA;
+  await readyB;
+
+  // A→B→Aの順で保存を交錯させる（旧実装ではBの丸ごと書き戻しがAのキーを潰した）
+  const stateA1 = { viewcount: 2, wire: true };
+  const stateB = { viewcount: 4, clip: { axis: 'x', pos: 10 } };
+  const stateA2 = { viewcount: 2, wire: false };
+  await post(appA.port(), '/state', JSON.stringify(stateA1));
+  await post(appB.port(), '/state', JSON.stringify(stateB));
+  await post(appA.port(), '/state', JSON.stringify(stateA2));
+  await new Promise((r) => setTimeout(r, 200));
+
+  // 双方が自分の最新状態を保持している
+  assert.deepStrictEqual(JSON.parse((await get(appA.port(), '/state')).body).state, stateA2);
+  assert.deepStrictEqual(JSON.parse((await get(appB.port(), '/state')).body).state, stateB);
+
+  // 片方を再起動しても（＝ディスクから読み直しても）両方残っている
+  await appA.close();
+  const appA2 = start({ watchDir: dirA, port: 0, stateFile: path.join(base, 'sa.txt'), uiStateDir });
+  t.after(() => appA2.close());
+  await new Promise((r) => appA2.server.on('listening', r));
+  assert.deepStrictEqual(JSON.parse((await get(appA2.port(), '/state')).body).state, stateA2);
+  assert.deepStrictEqual(JSON.parse((await get(appB.port(), '/state')).body).state, stateB);
+});
+
+test('ui state rejects invalid or oversized bodies without dying', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mieru-ui-'));
+  const app = start({ watchDir: dir, port: 0, stateFile: path.join(dir, 'state.txt'), uiStateDir: path.join(dir, 'ui-state') });
+  t.after(() => app.close());
+  await new Promise((r) => app.server.on('listening', r));
+  const port = app.port();
+
+  const bad = await post(port, '/state', 'not-json{');
+  assert.strictEqual(bad.status, 400);
+
+  const huge = await post(port, '/state', JSON.stringify({ blob: 'x'.repeat(6 * 1024 * 1024) }));
+  assert.ok(huge.status === 413 || huge.status === 400);
+
+  // サーバーは生きている
+  assert.strictEqual((await get(port, '/')).status, 200);
 });
 
 test('watch switch persists the directory to the state file', async (t) => {
