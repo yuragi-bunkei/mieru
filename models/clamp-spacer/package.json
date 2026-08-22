@@ -1,0 +1,13 @@
+{
+  "name": "clamp-spacer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "幕板裏に貼るかさ上げスペーサーのSTLジェネレータ",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "manifold-3d": "^3.5.1"
+  }
+}

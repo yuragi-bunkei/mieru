@@ -1,0 +1,14 @@
+{
+  "name": "desk-drawer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "天板に引っ掛ける後付け引き出しのSTLジェネレータ",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "check": "node check-slide.mjs"
+  },
+  "dependencies": {
+    "manifold-3d": "^3.5.1"
+  }
+}
