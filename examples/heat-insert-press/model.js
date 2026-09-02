@@ -291,18 +291,15 @@ if (isAssembly) {
   writeStl(path.join(outDir, 'base.stl'), buildBase())
   writeStl(path.join(outDir, 'tower.stl'), towerForPrint())
   writeStl(path.join(outDir, 'carriage.stl'), translate([130, 0, 0], buildCarriage()))
-  const small = []
-  ;[0, 1, 2, 3].forEach(i => {
-    small.push(translate([-110 + i * 20, -40, 0], buildAxle()))
-    small.push(translate([-110 + i * 20, -70, 0], buildCap()))
-    small.push(translate([-110 + i * 20, -95, 0], buildBushing()))
-  })
-  ;[0, 1, 2, 3].forEach(i => {
-    small.push(translate([-110 + i * 16, -120, 0], buildSpacer(spacerFrontOuter)))
-    small.push(translate([-110 + i * 16, -140, 0], buildSpacer(spacerBack)))
-  })
-  ;[0, 1].forEach(i => {
-    small.push(translate([-40 + i * 16, -120, 0], buildSpacer(spacerFrontInner)))
-  })
-  writeStl(path.join(outDir, 'small-parts.stl'), union(...small))
+  // 小物は種類ごとに1ファイル（同じ部品をまとめて印刷できる）
+  const row = (n, pitch, build) => union(...Array.from({ length: n }, (_, i) => translate([i * pitch, 0, 0], build(i))))
+  writeStl(path.join(outDir, 'axles.stl'), row(4, 20, () => buildAxle()))
+  writeStl(path.join(outDir, 'caps.stl'), row(4, 20, () => buildCap()))
+  writeStl(path.join(outDir, 'bushings.stl'), row(4, 24, () => buildBushing()))
+  const spacerLens = [
+    ...Array(4).fill(spacerFrontOuter), // 前面・壁側 4.5
+    ...Array(2).fill(spacerFrontInner), // 前面・ベアリング間 19
+    ...Array(4).fill(spacerBack),       // 背面 15
+  ]
+  writeStl(path.join(outDir, 'spacers.stl'), row(spacerLens.length, 16, i => buildSpacer(spacerLens[i])))
 }
