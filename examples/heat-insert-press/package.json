@@ -1,0 +1,14 @@
+{
+  "name": "heat-insert-press",
+  "version": "0.1.0",
+  "private": true,
+  "description": "はんだごてを垂直に保持してインサートナットを圧入する治具のSTL生成スクリプト",
+  "scripts": {
+    "build": "node model.js",
+    "assembly": "node model.js --assembly"
+  },
+  "dependencies": {
+    "@jscad/modeling": "^2.13.0",
+    "@jscad/stl-serializer": "^2.1.23"
+  }
+}
