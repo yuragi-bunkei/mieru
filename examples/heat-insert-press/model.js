@@ -13,7 +13,11 @@
 // 樹脂同士の摺動はスティックスリップ（カクつき）が出るため、案内は転がり
 // （608ベアリング）とし、摺動摩擦に頼らない設計にしている。
 //
-// 市販部品: 608ZZベアリング ×6、M4ボルト30mm+ナット ×2（こてクランプ用）
+// こては YIHUA 928D-III（2026-09-02 実測: グリップ最太部⌀22、直胴47.5mm、
+// その先5mmに操作ボタン）。リング高さ40mmは直胴区間に収めるための上限。
+// クランプ締結は M3×20ねじ + 熱圧入インサート（下穴φ4.6×6.0の較正標準値）
+//
+// 市販部品: 608ZZベアリング ×6、M3×20なべ小ねじ ×2、M3インサート(外径5.0×L4.0) ×2
 
 const fs = require('node:fs')
 const path = require('node:path')
@@ -25,12 +29,16 @@ const stlSerializer = require('@jscad/stl-serializer')
 
 // ---- パラメータ（mm） -------------------------------------------------
 const P = {
-  ironDiameter: 22.0, // はんだごてのグリップ/バレル外径（要実測）
+  ironDiameter: 22.0, // 928D-III グリップ最太部（2026-09-02 実測）
+  clampClear: 0.3,    // ボアの片側クリアランス（挿入用。割りを締めて詰める）
   ringWall: 4,        // クランプリングの肉厚
+  ringH: 40,          // リング高さ（直胴47.5mm・ボタン手前5mmに収める上限）
   slitW: 3,           // 割りスリット幅
-  boltHole: 4.4,      // M4ボルト通し穴径
-  nutFlats: 7.3,      // M4ナット二面幅+遊び
-  nutDepth: 3.6,      // ナットポケット深さ
+  screwClear: 3.4,    // M3通し穴径（較正標準のバカ穴）
+  insertPilot: 4.6,   // M3インサート下穴径（較正標準）
+  insertDepth: 6.0,   // インサート下穴深さ（較正標準）
+  headCbore: 6.5,     // なべ頭の座繰り径
+  headCboreD: 4,      // 座繰り深さ（M3×20の掛かり代を確保する）
 
   baseW: 150, baseD: 130, baseT: 8, // ベースプレート
   towerW: 40, towerD: 30, towerH: 220, // 角柱レール
@@ -59,9 +67,10 @@ const cavityHalfX = P.towerW / 2 + 1    // スリーブ内幅の半分（角柱+
 const wallOuterX = cavityHalfX + P.wallT
 const plateD = 6                        // 前面プレート厚（y: 0..6）
 const yWallEnd = yAxleB + brgR + 2 + P.wallT // 側壁の後端
-const Ri = P.ironDiameter / 2
+const Ri = P.ironDiameter / 2 + P.clampClear
 const Ro = Ri + P.ringWall
 const yC = 0 - Ro + 2                   // リング中心（前面プレートと2mm重ねて結合）
+const RH = P.ringH                      // リング・耳の高さ（キャリッジ下端揃え）
 
 // ---- フレーム（ベース+角柱レール一体） --------------------------------
 function buildFrame () {
@@ -109,16 +118,17 @@ function buildCarriage () {
       }))
     }
   }
-  // こてクランプ（割りリング+ボルト耳）
-  const ringOuter = cylinder({ radius: Ro, height: H, segments: 96, center: [0, yC, H / 2] })
+  // こてクランプ（割りリング+ねじ耳）。リングは直胴区間に収まるようキャリッジ
+  // 下端に高さRHだけ設け、こて先の下方突き出しを最大化する
+  const ringOuter = cylinder({ radius: Ro, height: RH, segments: 96, center: [0, yC, RH / 2] })
   const web = cuboid({
-    size: [Math.min(2 * wallOuterX - 8, 2 * Ro), plateD - yC, H],
-    center: [0, (plateD + yC) / 2, H / 2],
+    size: [Math.min(2 * wallOuterX - 8, 2 * Ro), plateD - yC, RH],
+    center: [0, (plateD + yC) / 2, RH / 2],
   })
   const earW = 10, earD = 15
   const ears = [-1, 1].map(s => cuboid({
-    size: [earW, earD, H],
-    center: [s * (P.slitW / 2 + earW / 2), yC - 5 - earD / 2, H / 2],
+    size: [earW, earD, RH],
+    center: [s * (P.slitW / 2 + earW / 2), yC - 5 - earD / 2, RH / 2],
   }))
   // 輪ゴム掛けペグ（右側壁の外面、フレーム上部のペグと対になる）
   const peg = translate([wallOuterX - 2, yWallEnd / 2, H - 12],
@@ -128,22 +138,25 @@ function buildCarriage () {
     )))
   const solid = union(frontPlate, ...walls, backWall, ...pads, ringOuter, web, ...ears, peg)
 
-  const bore = cylinder({ radius: Ri, height: H + 4, segments: 96, center: [0, yC, H / 2] })
-  const slit = cuboid({ size: [P.slitW, 2 * Ro, H + 4], center: [0, yC - Ro, H / 2] })
+  const bore = cylinder({ radius: Ri, height: RH + 4, segments: 96, center: [0, yC, RH / 2] })
+  const slit = cuboid({ size: [P.slitW, 2 * Ro, RH + 4], center: [0, yC - Ro, RH / 2] })
+  // M3×20 + 熱圧入インサート: -X耳=座繰り+バカ穴、+X耳=外面からインサート下穴。
+  // 座繰り4mmで頭を沈め、ねじ先端がインサート(+X耳外面側の4mm)を全長掴む
   const yBolt = yC - 14.7
-  const zBolt = [20, H - 20]
-  const clampBolts = zBolt.map(z => translate([0, yBolt, z],
-    rotateY(Math.PI / 2, cylinder({ radius: P.boltHole / 2, height: 40, segments: 32 }))))
-  const nutR = P.nutFlats / Math.sqrt(3)
+  const zBolt = [10, RH - 10]
   const earOuterX = P.slitW / 2 + earW
-  const nuts = zBolt.map(z => translate([earOuterX - P.nutDepth / 2 + 0.5, yBolt, z],
-    rotateY(Math.PI / 2, cylinder({ radius: nutR, height: P.nutDepth + 1, segments: 6 }))))
+  const clampBolts = zBolt.map(z => translate([0, yBolt, z],
+    rotateY(Math.PI / 2, cylinder({ radius: P.screwClear / 2, height: 40, segments: 32 }))))
+  const cbores = zBolt.map(z => translate([-earOuterX + P.headCboreD / 2 - 0.5, yBolt, z],
+    rotateY(Math.PI / 2, cylinder({ radius: P.headCbore / 2, height: P.headCboreD + 1, segments: 32 }))))
+  const pilots = zBolt.map(z => translate([earOuterX - P.insertDepth / 2 + 0.5, yBolt, z],
+    rotateY(Math.PI / 2, cylinder({ radius: P.insertPilot / 2, height: P.insertDepth + 1, segments: 32 }))))
   // ベアリング軸穴（前面: ⌀8軸を直接、背面: ⌀12偏心ブッシュ経由）
   const axleHoles = zBrg.map(z => translate([0, yAxleF, z],
     rotateY(Math.PI / 2, cylinder({ radius: P.axleHole / 2, height: 2 * wallOuterX + 2, segments: 48 }))))
   const bushHoles = zBrg.map(z => translate([0, yAxleB, z],
     rotateY(Math.PI / 2, cylinder({ radius: P.bushHole / 2, height: 2 * wallOuterX + 2, segments: 48 }))))
-  return subtract(solid, bore, slit, ...clampBolts, ...nuts, ...axleHoles, ...bushHoles)
+  return subtract(solid, bore, slit, ...clampBolts, ...cbores, ...pilots, ...axleHoles, ...bushHoles)
 }
 
 // ---- 軸・キャップ・偏心ブッシュ ---------------------------------------
@@ -190,11 +203,15 @@ function writeStl (file, geom) {
 
 const outDir = path.join(__dirname, 'stl')
 fs.mkdirSync(outDir, { recursive: true })
+// 自分のモードが書くファイルだけ消す（build と assembly の出力を共存させる）
+const isAssembly = process.argv.includes('--assembly')
 for (const f of fs.readdirSync(outDir)) {
-  if (f.endsWith('.stl')) fs.unlinkSync(path.join(outDir, f))
+  if (f.endsWith('.stl') && (f === 'assembly.stl') === isAssembly) {
+    fs.unlinkSync(path.join(outDir, f))
+  }
 }
 
-if (process.argv.includes('--assembly')) {
+if (isAssembly) {
   // 組立状態のプレビュー: キャリッジをレール中程に置き、ベアリングとこてを配置
   const zC = 110
   const parts = [buildFrame(), translate([0, 0, zC], buildCarriage())]
