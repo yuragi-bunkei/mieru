@@ -12,6 +12,7 @@
 //   cap      … 軸の抜け止めキャップ ×4
 //   bushing  … 偏心ブッシュ（背面軸用、回してガタ取り） ×4
 //   spacer   … ベアリングの軸方向位置決め管 ×10
+//   knob     … こてクランプ用ツマミ（なべ頭M3を内蔵、工具なしで着脱） ×2
 // 樹脂同士の摺動はスティックスリップ（カクつき）が出るため、案内は転がり
 // （608ベアリング）とし、摺動摩擦に頼らない設計にしている。
 //
@@ -44,8 +45,13 @@ const P = {
   insertPilot: 4.6,        // M3インサート下穴径（垂直穴・較正標準）
   insertPilotH: 4.7,       // 同・水平穴（印刷で上側が垂れる分を足す）
   insertDepth: 6.0,        // インサート下穴深さ（較正標準）
-  headCbore: 6.5,          // なべ頭の座繰り径
+  headCbore: 6.5,          // なべ頭の座繰り径（ベース裏。頭が直接座る）
   headCboreD: 4,           // 座繰り深さ
+  knobStemHole: 9.2,       // クランプ左耳の座繰り径（ツマミの軸⌀8.5を受ける。水平穴なので0.35/側）
+  knobD: 20, knobT: 5,     // ツマミ円盤の径・厚み
+  knobStemD: 8.5,          // ツマミ軸の径（座繰り深さ4mmぶん入る）
+  headPocketD: 5.9,        // なべ頭M3（⌀5.5×高さ2.0）の袋穴径
+  headPocketDepth: 2.6,    // 袋穴深さ（頭2.0 + プラス溝に入る突起の余地）
 
   baseW: 150, baseD: 130, baseT: 10, // ベースプレート
   pocketD: 2, pocketClear: 0.3,      // 柱を受けるポケットの深さ・片側クリアランス
@@ -167,7 +173,7 @@ function buildCarriage () {
     size: [Math.min(2 * wallOuterX - 8, 2 * Ro), plateD - yC, RH],
     center: [0, (plateD + yC) / 2, zRc],
   })
-  const earW = 10, earD = 15
+  const earW = 10, earD = 20             // 耳の奥行き20: ⌀9.2座繰りの前後に4mm以上の肉を残す
   const ears = [-1, 1].map(s => cuboid({
     size: [earW, earD, RH],
     center: [s * (P.slitW / 2 + earW / 2), yC - 5 - earD / 2, zRc],
@@ -185,14 +191,15 @@ function buildCarriage () {
   const boreFront = cylinder({ radius: RiFront, height: P.frontLen + 2, segments: 96, center: [0, yC, zRing0 + P.frontLen / 2 - 1] })
   const slit = cuboid({ size: [P.slitW, 2 * Ro, RH + 4], center: [0, yC - Ro, zRc] })
   // M3×20 + 熱圧入インサート: -X耳=座繰り+バカ穴、+X耳=外面からインサート下穴。
-  // 座繰り4mmで頭を沈め、ねじ先端がインサート(+X耳外面側の4mm)を全長掴む
-  const yBolt = yC - 14.7
+  // 座繰り4mmにツマミの軸（頭を内蔵）が入り、頭は座繰り底に座る。
+  // ねじ先端がインサート(+X耳外面側の4mm)を全長掴む
+  const yBolt = yC - 16                  // 座繰りがボアに抜けず、耳の前縁にも肉が残る位置
   const zBolt = [zRing0 + 10, zRing0 + RH - 10]
   const earOuterX = P.slitW / 2 + earW
   const clampBolts = zBolt.map(z => translate([0, yBolt, z],
     rotateY(Math.PI / 2, cylinder({ radius: P.screwClear / 2, height: 40, segments: 32 }))))
   const cbores = zBolt.map(z => translate([-earOuterX + P.headCboreD / 2 - 0.5, yBolt, z],
-    rotateY(Math.PI / 2, cylinder({ radius: P.headCbore / 2, height: P.headCboreD + 1, segments: 32 }))))
+    rotateY(Math.PI / 2, cylinder({ radius: P.knobStemHole / 2, height: P.headCboreD + 1, segments: 48 }))))
   const pilots = zBolt.map(z => translate([earOuterX - P.insertDepth / 2 + 0.5, yBolt, z],
     rotateY(Math.PI / 2, cylinder({ radius: P.insertPilotH / 2, height: P.insertDepth + 1, segments: 32 }))))
   // ベアリング軸穴（前面: ⌀8軸を直接、背面: ⌀12偏心ブッシュ経由）
@@ -232,6 +239,27 @@ function buildBushing () {
   })
   const mark = cylinder({ radius: 1.2, height: bushFlange + 2, segments: 24, center: [9, 0, bushFlange / 2] })
   return subtract(union(flange, body), bore, mark)
+}
+
+function buildKnob () {
+  // こてクランプ用ツマミ。なべ頭M3を軸先端の袋穴に収め、底の「+」突起がプラス溝に
+  // 噛んで回転を伝える（貫通穴なし。頭は耳の座繰り底に直接座る）。
+  // 円盤を下にして印刷すると袋穴が上を向き、突起はサポートなしで立つ
+  const stemH = P.headCboreD
+  const disc = cylinder({ radius: P.knobD / 2, height: P.knobT, segments: 96, center: [0, 0, P.knobT / 2] })
+  const stem = cylinder({ radius: P.knobStemD / 2, height: stemH + 0.5, segments: 64, center: [0, 0, P.knobT + (stemH + 0.5) / 2 - 0.5] })
+  const scallops = Array.from({ length: 6 }, (_, i) => {
+    const a = (i / 6) * 2 * Math.PI
+    return cylinder({ radius: 3, height: P.knobT + 2, segments: 32, center: [Math.cos(a) * (P.knobD / 2 + 1.5), Math.sin(a) * (P.knobD / 2 + 1.5), P.knobT / 2] })
+  })
+  const zTop = P.knobT + stemH
+  const pocket = cylinder({ radius: P.headPocketD / 2, height: P.headPocketDepth + 1, segments: 48, center: [0, 0, zTop - P.headPocketDepth / 2 + 0.5] })
+  const ridgeZ = zTop - P.headPocketDepth
+  const ridge = union(
+    cuboid({ size: [3.2, 0.9, 1.0], center: [0, 0, ridgeZ + 0.5] }),
+    cuboid({ size: [0.9, 3.2, 1.0], center: [0, 0, ridgeZ + 0.5] }),
+  )
+  return union(subtract(union(disc, stem), ...scallops, pocket), ridge)
 }
 
 function buildSpacer (len) {
@@ -302,4 +330,5 @@ if (isAssembly) {
     ...Array(4).fill(spacerBack),       // 背面 15
   ]
   writeStl(path.join(outDir, 'spacers.stl'), row(spacerLens.length, 16, i => buildSpacer(spacerLens[i])))
+  writeStl(path.join(outDir, 'knobs.stl'), row(2, 26, () => buildKnob()))
 }
