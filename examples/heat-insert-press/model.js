@@ -63,7 +63,11 @@ const P = {
   axleHole: 8.3,      // 軸の通し穴径（静止嵌合）
   capHole: 7.8,       // キャップの圧入穴径（7.6はPETGで入らなかった。caps-fit-test.stl で決める）
   capHoleTest: [7.7, 7.8, 7.9, 8.0], // 嵌合テスト用キャップの穴径（縁の切り欠き数 = 添字+1）
-  bushHole: 12.6,     // 偏心ブッシュの通し穴径（ブッシュ外径11.9、回すので片側0.35）
+  bushHole: 12.6,     // 偏心ブッシュの通し穴径（キャリッジ側。水平穴で縮む）
+  bushBody: 12.3,     // ブッシュ胴の外径。滑り嵌め(11.9)ではガタが偏心量を食って効かない。
+                      // ペンチで回せる程度のきつさが正解。bushings-fit-test.stl で実測して決める
+  bushBore: 8.0,      // ブッシュの軸穴（軸7.85。軸は回らないので隙間は最小で）
+  bushBodyTest: [12.1, 12.25, 12.4, 12.55], // 嵌合テスト用の胴径（フランジ面の点の数 = 添字+1）
   bushOffset: 0.75,   // 偏心量（回すと背面ベアリングが±0.75mm動く）
   spacerOD: 11,       // スペーサー管の外径（608内輪だけに当たる）
 
@@ -232,19 +236,24 @@ function buildCap (holeD = P.capHole, notches = 0) {
   return subtract(body, hole, ...marks)
 }
 
-function buildBushing () {
+function buildBushing (bodyD = P.bushBody, dots = 0) {
   // 背面軸用の偏心ブッシュ。六角フランジをつまんで回すとガタ取りできる。
-  // フランジの切り欠きが偏心方向（穴がずれている側）。左右の壁で同じ向きに揃える
+  // フランジの切り欠きが偏心方向（穴がずれている側）。左右の壁で同じ向きに揃える。
+  // dots: フランジ外面の点の数（嵌合テスト用の識別）
   const flange = cylinder({ radius: 9, height: bushFlange, segments: 6, center: [0, 0, bushFlange / 2] })
   const bodyH = P.wallT                 // フランジの先に壁の厚みぶん。内面と面一
-  const body = cylinder({ radius: 5.95, height: bodyH, segments: 48, center: [0, 0, bushFlange + bodyH / 2] })
+  const body = cylinder({ radius: bodyD / 2, height: bodyH, segments: 48, center: [0, 0, bushFlange + bodyH / 2] })
   const totalH = bushFlange + bodyH
   const bore = cylinder({
-    radius: P.axleHole / 2, height: totalH + 2, segments: 48,
+    radius: P.bushBore / 2, height: totalH + 2, segments: 48,
     center: [P.bushOffset, 0, totalH / 2],
   })
   const mark = cylinder({ radius: 1.2, height: bushFlange + 2, segments: 24, center: [9, 0, bushFlange / 2] })
-  return subtract(union(flange, body), bore, mark)
+  const idDots = Array.from({ length: dots }, (_, i) => {
+    const a = Math.PI / 2 + (i / 4) * 2 * Math.PI   // 切り欠き(0°)を避けて90°から
+    return cylinder({ radius: 0.7, height: 1.6, segments: 16, center: [Math.cos(a) * 7.3, Math.sin(a) * 7.3, 0] })
+  })
+  return subtract(union(flange, body), bore, mark, ...idDots)
 }
 
 function buildKnob () {
@@ -335,6 +344,8 @@ if (isAssembly) {
   // 嵌合テスト: 穴径を振ったキャップ。切り欠き1個=最小径。合う物の径を capHole に書き戻す
   writeStl(path.join(outDir, 'caps-fit-test.stl'), row(P.capHoleTest.length, 20, i => buildCap(P.capHoleTest[i], i + 1)))
   writeStl(path.join(outDir, 'bushings.stl'), row(4, 24, () => buildBushing()))
+  // 嵌合テスト: 胴径を振ったブッシュ。点1個=最小径。「親指で入り、ペンチで回せる」物を bushBody に書き戻す
+  writeStl(path.join(outDir, 'bushings-fit-test.stl'), row(P.bushBodyTest.length, 24, i => buildBushing(P.bushBodyTest[i], i + 1)))
   const spacerLens = [
     ...Array(4).fill(spacerFrontOuter), // 前面・壁側 4.5
     ...Array(2).fill(spacerFrontInner), // 前面・ベアリング間 19

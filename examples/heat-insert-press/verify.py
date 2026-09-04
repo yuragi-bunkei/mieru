@@ -57,6 +57,17 @@ cx = (p.bounds[0][0] + p.bounds[1][0]) / 2; cy = (p.bounds[0][1] + p.bounds[1][1
 fl = hits(p, [cx - 7.5, cy, -5], [0, 0, 1]); bd = hits(p, [cx + 5.5, cy, -5], [0, 0, 1])
 flangeT = fl[1] - fl[0]; bodyBeyond = bd[-1] - fl[1]; protrude = bodyBeyond - wallT
 check('ブッシュ胴 = 壁厚（内側に出ない）', abs(protrude) < 0.05, f'胴 {bodyBeyond} vs 壁 {wallT}')
+# 胴径 vs 壁の穴径: 偏心調整はガタが効き幅を食うので、隙間は直径で 0〜0.5 に収める
+xs = [x - cx for x in hits(p, [cx - 20, cy, flangeT + 3.0], [1, 0, 0])]   # 胴の高さでX方向: 外,穴,穴,外
+bodyOD = xs[-1] - xs[0]
+boreEdges = sorted(xs, key=abs)[:2]; boreD = abs(boreEdges[0] - boreEdges[1])
+wallHole = hits(c, [26, -60, 15], [0, 1, 0]); wallHole = [(a, b) for a, b in zip(wallHole, wallHole[1:]) if a < 71 < b][0]
+wallHoleD = wallHole[1] - wallHole[0]
+check('ブッシュ胴 と 壁穴 の隙間 0〜0.5', 0 <= wallHoleD - bodyOD <= 0.5, f'穴 {round(wallHoleD, 2)} − 胴 {round(bodyOD, 2)} = {round(wallHoleD - bodyOD, 2)}')
+ap = sorted(bodies(meshes['axles.stl']), key=lambda q: q.bounds[0][0])[0]
+acx = (ap.bounds[0][0] + ap.bounds[1][0]) / 2; acy = (ap.bounds[0][1] + ap.bounds[1][1]) / 2
+axs = hits(ap, [acx - 20, acy, 30], [1, 0, 0]); axleD = axs[-1] - axs[0]
+check('ブッシュ軸穴 と 軸 の隙間 0.05〜0.3', 0.05 <= boreD - axleD <= 0.3, f'穴 {round(boreD, 2)} − 軸 {round(axleD, 2)} = {round(boreD - axleD, 2)}')
 
 # ---- スペーサー列の遊び ---------------------------------------------------
 sp = heights(bodies(meshes['spacers.stl']))
