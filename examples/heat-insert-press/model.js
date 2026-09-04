@@ -93,8 +93,7 @@ const Ro = Ri + P.ringWall
 const yC = 0 - Ro + 2                   // リング中心（前面プレートと2mm重ねて結合）
 const RH = P.ringH
 const zRing0 = H - RH                   // リングはキャリッジ上端揃え（ワーク高さの余裕が最大になる）
-const bushFlange = 2.5
-const flangeIn = 2.5                    // ブッシュ胴のスリーブ内への突き出し
+const bushFlange = 2.5                  // ブッシュのフランジ厚。胴は壁の厚みと同じで内側に出ない
 
 // ---- ベース（柱ポケット + 裏からのねじ止め） --------------------------
 function buildBase () {
@@ -231,11 +230,12 @@ function buildBushing () {
   // 背面軸用の偏心ブッシュ。六角フランジをつまんで回すとガタ取りできる。
   // フランジの切り欠きが偏心方向（穴がずれている側）。左右の壁で同じ向きに揃える
   const flange = cylinder({ radius: 9, height: bushFlange, segments: 6, center: [0, 0, bushFlange / 2] })
-  const bodyH = P.wallT + flangeIn
-  const body = cylinder({ radius: 5.95, height: bodyH, segments: 48, center: [0, 0, bodyH / 2] })
+  const bodyH = P.wallT                 // フランジの先に壁の厚みぶん。内面と面一
+  const body = cylinder({ radius: 5.95, height: bodyH, segments: 48, center: [0, 0, bushFlange + bodyH / 2] })
+  const totalH = bushFlange + bodyH
   const bore = cylinder({
-    radius: P.axleHole / 2, height: bodyH + 2, segments: 48,
-    center: [P.bushOffset, 0, bodyH / 2],
+    radius: P.axleHole / 2, height: totalH + 2, segments: 48,
+    center: [P.bushOffset, 0, totalH / 2],
   })
   const mark = cylinder({ radius: 1.2, height: bushFlange + 2, segments: 24, center: [9, 0, bushFlange / 2] })
   return subtract(union(flange, body), bore, mark)
@@ -268,13 +268,13 @@ function buildSpacer (len) {
   return subtract(body, hole)
 }
 
-// スペーサー長: 前面=壁内面〜ベアリング / ベアリング間、背面=ブッシュ突き出し〜ベアリング。
+// スペーサー長: 前面=壁内面〜ベアリング / ベアリング間、背面=壁内面（ブッシュ端面）〜ベアリング。
 // 部品列の合計がスリーブ内幅と同じだと組めない（遊びゼロ＋印刷縮み）ので、
 // 壁側のスペーサーを片側 axialSlack/2 ずつ短くして計 axialSlack の遊びを作る
 const axialSlack = 1.0
 const spacerFrontOuter = cavityHalfX - (xBrgF + P.brgW / 2) - axialSlack / 2   // 4.0
 const spacerFrontInner = 2 * (xBrgF - P.brgW / 2)                              // 19
-const spacerBack = cavityHalfX - flangeIn - P.brgW / 2 - axialSlack / 2         // 14.5
+const spacerBack = cavityHalfX - P.brgW / 2 - axialSlack / 2                    // 17.0
 
 function bearingDummy () {
   return subtract(
