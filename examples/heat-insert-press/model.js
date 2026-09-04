@@ -268,10 +268,13 @@ function buildSpacer (len) {
   return subtract(body, hole)
 }
 
-// スペーサー長: 前面=壁内面〜ベアリング / ベアリング間、背面=ブッシュ突き出し〜ベアリング
-const spacerFrontOuter = cavityHalfX - (xBrgF + P.brgW / 2)          // 4.5
-const spacerFrontInner = 2 * (xBrgF - P.brgW / 2)                    // 19
-const spacerBack = cavityHalfX - flangeIn - P.brgW / 2                // 15
+// スペーサー長: 前面=壁内面〜ベアリング / ベアリング間、背面=ブッシュ突き出し〜ベアリング。
+// 部品列の合計がスリーブ内幅と同じだと組めない（遊びゼロ＋印刷縮み）ので、
+// 壁側のスペーサーを片側 axialSlack/2 ずつ短くして計 axialSlack の遊びを作る
+const axialSlack = 1.0
+const spacerFrontOuter = cavityHalfX - (xBrgF + P.brgW / 2) - axialSlack / 2   // 4.0
+const spacerFrontInner = 2 * (xBrgF - P.brgW / 2)                              // 19
+const spacerBack = cavityHalfX - flangeIn - P.brgW / 2 - axialSlack / 2         // 14.5
 
 function bearingDummy () {
   return subtract(
