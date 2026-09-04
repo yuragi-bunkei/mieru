@@ -70,6 +70,8 @@ cd ../.. && node server.js examples/heat-insert-press/stl   # mieruで表示
 
 ## 6. 検証済み事項
 
+- **積み上げ検算**: `examples/heat-insert-press/verify.py`（uv）。stl/ の実測と設計意図の数値を突き合わせる。`npm run build && ./verify.py` で ALL OK を確認してから納品する（2026-09-05追加。スペーサー列同寸・ブッシュ突出ゼロの2件はこれで捕まる）
+
 - `npm run build` / `npm run assembly` でSTL生成成功
 - mieru上で目視確認済み: ベアリング配置、ボア、スリット、軸穴、周回溝、パーツ間干渉なし（スクリーンショット: `examples/heat-insert-press/docs/preview-*.png`）
 - ルート `npm test` 全12件パス（サーバー側コード変更なし）

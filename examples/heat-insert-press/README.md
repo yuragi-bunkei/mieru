@@ -60,6 +60,12 @@ npm run build        # 印刷用STL一式を stl/ に出力
 npm run assembly     # stl/assembly.stl（組立プレビュー、印刷不可）を出力
 ```
 
+寸法の検算（`stl/` の実測と設計意図の数値を突き合わせる。model.js の式は使わない）:
+
+```bash
+./verify.py      # uv が必要。造形サイズ・連結体数・スペーサー列の遊び・ねじの掛かり代など
+```
+
 mieruで確認する場合（リポジトリルートで）:
 
 ```bash
