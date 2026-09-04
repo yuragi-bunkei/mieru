@@ -61,7 +61,8 @@ const P = {
   brgOD: 22, brgW: 7, brgBore: 8, // 608ZZ
   axleD: 7.85,        // 軸径（608内径8.000に入る印刷寸法）
   axleHole: 8.3,      // 軸の通し穴径（静止嵌合）
-  capHole: 7.6,       // キャップの圧入穴径
+  capHole: 7.8,       // キャップの圧入穴径（7.6はPETGで入らなかった。caps-fit-test.stl で決める）
+  capHoleTest: [7.7, 7.8, 7.9, 8.0], // 嵌合テスト用キャップの穴径（縁の切り欠き数 = 添字+1）
   bushHole: 12.6,     // 偏心ブッシュの通し穴径（ブッシュ外径11.9、回すので片側0.35）
   bushOffset: 0.75,   // 偏心量（回すと背面ベアリングが±0.75mm動く）
   spacerOD: 11,       // スペーサー管の外径（608内輪だけに当たる）
@@ -219,11 +220,16 @@ function buildAxle () {
   return union(head, shaft)
 }
 
-function buildCap () {
-  // 軸端に押し込む抜け止め（貫通穴で軽圧入。軸の突き出し量に関わらず使える）
+function buildCap (holeD = P.capHole, notches = 0) {
+  // 軸端に押し込む抜け止め（貫通穴で軽圧入。軸の突き出し量に関わらず使える）。
+  // notches: 縁の切り欠き数（嵌合テスト用の識別）
   const body = cylinder({ radius: 6, height: 8, segments: 48, center: [0, 0, 4] })
-  const hole = cylinder({ radius: P.capHole / 2, height: 10, segments: 48, center: [0, 0, 4] })
-  return subtract(body, hole)
+  const hole = cylinder({ radius: holeD / 2, height: 10, segments: 48, center: [0, 0, 4] })
+  const marks = Array.from({ length: notches }, (_, i) => {
+    const a = (i / Math.max(notches, 1)) * 2 * Math.PI
+    return cylinder({ radius: 0.9, height: 10, segments: 16, center: [Math.cos(a) * 6, Math.sin(a) * 6, 4] })
+  })
+  return subtract(body, hole, ...marks)
 }
 
 function buildBushing () {
@@ -326,6 +332,8 @@ if (isAssembly) {
   const row = (n, pitch, build) => union(...Array.from({ length: n }, (_, i) => translate([i * pitch, 0, 0], build(i))))
   writeStl(path.join(outDir, 'axles.stl'), row(4, 20, () => buildAxle()))
   writeStl(path.join(outDir, 'caps.stl'), row(4, 20, () => buildCap()))
+  // 嵌合テスト: 穴径を振ったキャップ。切り欠き1個=最小径。合う物の径を capHole に書き戻す
+  writeStl(path.join(outDir, 'caps-fit-test.stl'), row(P.capHoleTest.length, 20, i => buildCap(P.capHoleTest[i], i + 1)))
   writeStl(path.join(outDir, 'bushings.stl'), row(4, 24, () => buildBushing()))
   const spacerLens = [
     ...Array(4).fill(spacerFrontOuter), // 前面・壁側 4.5
