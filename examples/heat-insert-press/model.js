@@ -50,8 +50,9 @@ const P = {
   knobStemHole: 9.2,       // クランプ左耳の座繰り径（ツマミの軸⌀8.5を受ける。水平穴なので0.35/側）
   knobD: 20, knobT: 5,     // ツマミ円盤の径・厚み
   knobStemD: 8.5,          // ツマミ軸の径（座繰り深さ4mmぶん入る）
-  headPocketD: 5.9,        // なべ頭M3（⌀5.5×高さ2.0）の袋穴径
+  headPocketD: 5.9,        // なべ頭M3（⌀5.5×高さ2.0）の袋穴径（押し込み＋接着剤の版）
   headPocketDepth: 2.6,    // 袋穴深さ（頭2.0 + プラス溝に入る突起の余地）
+  headPocketHeatD: 5.1,    // 熱埋め版の穴径（頭より小さい。頭の裏にこてを当てて溶かし込む）
 
   baseW: 150, baseD: 130, baseT: 10, // ベースプレート
   pocketD: 2, pocketClear: 0.3,      // 柱を受けるポケットの深さ・片側クリアランス
@@ -256,9 +257,12 @@ function buildBushing (bodyD = P.bushBody, dots = 0) {
   return subtract(union(flange, body), bore, mark, ...idDots)
 }
 
-function buildKnob () {
-  // こてクランプ用ツマミ。なべ頭M3を軸先端の袋穴に収め、底の「+」突起がプラス溝に
-  // 噛んで回転を伝える（貫通穴なし。頭は耳の座繰り底に直接座る）。
+function buildKnob (heat = false) {
+  // こてクランプ用ツマミ。なべ頭M3を軸先端の袋穴に収める（貫通穴なし。頭は耳の座繰り底に直接座る）。
+  //   heat=false: 袋穴⌀5.9＋底の「+」突起がプラス溝に噛む。押し込んで瞬間接着剤で抜け止め
+  //   heat=true : 袋穴⌀5.1（頭より小さい）・突起なし。ねじを頭を下に穴の口に立て、軸をペンチで
+  //               垂直に保持し、頭の裏（軸の根元まわり）にこて先を当てて押すと、頭が樹脂を溶かして
+  //               沈み込む。冷えると樹脂が頭とプラス溝を抱くので接着剤不要（インサート圧入と同じ原理）
   // 円盤を下にして印刷すると袋穴が上を向き、突起はサポートなしで立つ
   const stemH = P.headCboreD
   const disc = cylinder({ radius: P.knobD / 2, height: P.knobT, segments: 96, center: [0, 0, P.knobT / 2] })
@@ -268,13 +272,16 @@ function buildKnob () {
     return cylinder({ radius: 3, height: P.knobT + 2, segments: 32, center: [Math.cos(a) * (P.knobD / 2 + 1.5), Math.sin(a) * (P.knobD / 2 + 1.5), P.knobT / 2] })
   })
   const zTop = P.knobT + stemH
-  const pocket = cylinder({ radius: P.headPocketD / 2, height: P.headPocketDepth + 1, segments: 48, center: [0, 0, zTop - P.headPocketDepth / 2 + 0.5] })
+  const pocketD = heat ? P.headPocketHeatD : P.headPocketD
+  const pocket = cylinder({ radius: pocketD / 2, height: P.headPocketDepth + 1, segments: 48, center: [0, 0, zTop - P.headPocketDepth / 2 + 0.5] })
+  const body = subtract(union(disc, stem), ...scallops, pocket)
+  if (heat) return body
   const ridgeZ = zTop - P.headPocketDepth
   const ridge = union(
     cuboid({ size: [3.2, 0.9, 1.0], center: [0, 0, ridgeZ + 0.5] }),
     cuboid({ size: [0.9, 3.2, 1.0], center: [0, 0, ridgeZ + 0.5] }),
   )
-  return union(subtract(union(disc, stem), ...scallops, pocket), ridge)
+  return union(body, ridge)
 }
 
 function buildSpacer (len) {
@@ -353,4 +360,5 @@ if (isAssembly) {
   ]
   writeStl(path.join(outDir, 'spacers.stl'), row(spacerLens.length, 16, i => buildSpacer(spacerLens[i])))
   writeStl(path.join(outDir, 'knobs.stl'), row(2, 26, () => buildKnob()))
+  writeStl(path.join(outDir, 'knobs-heat.stl'), row(2, 26, () => buildKnob(true)))  // 熱埋め版（接着剤不要）
 }
