@@ -3,6 +3,8 @@
 [`showreel.mp4`](showreel.mp4)（1920×1080 / 30fps / 60秒 / 音声つき）と、それを生成するプログラム一式です。
 mieru 本体（STLビューア）の機能とは無関係な、独立したデモ映像です。
 
+![各場面の抜粋](preview.jpg)
+
 - 画像・動画・3Dモデル・録音済み音源などの**素材ファイルは使っていません**
 - 映像は WebGL2 のシェーダ（画素ごとに実行される小さなプログラム）で1フレームずつ描画
 - 音楽は発振器（のこぎり波・正弦波）と乱数ノイズから合成
@@ -31,7 +33,8 @@ mieru 本体（STLビューア）の機能とは無関係な、独立したデ�
 | `film.html` / `film.js` | 映像本体。`window.renderFrame(n)` で n 番目のフレームを描く。全場面が時刻の純関数なので、任意のフレームを単独で再現できる |
 | `render.js` | ヘッドレスChromiumで `film.html` を1フレームずつ描き、PNG連番で保存 |
 | `audio.js` | 音楽を合成して WAV に書き出す（依存ライブラリなし） |
-| `showreel.mp4` | 完成品 |
+| `showreel.mp4` | 完成品（約39MB） |
+| `preview.jpg` | 各場面の抜粋（このREADME用） |
 
 ## 作り直す手順
 
@@ -42,11 +45,18 @@ Playwright は mieru 本体の依存には含めていないので、別途イ�
 cd docs/showreel
 node render.js --out /tmp/frames --workers 4      # 1,800フレームを描画
 node audio.js /tmp/showreel.wav                   # 音楽を合成
+# mp4 にまとめる（2パス・映像 5Mbps。容量は約39MB）
+VF='scale=in_range=full:out_range=tv:out_color_matrix=bt709'
+ffmpeg -framerate 30 -i /tmp/frames/f%05d.png -c:v libx264 -preset slow -b:v 5000k \
+  -pass 1 -pix_fmt yuv420p -vf "$VF" -an -f null /dev/null
 ffmpeg -framerate 30 -i /tmp/frames/f%05d.png -i /tmp/showreel.wav \
-  -c:v libx264 -preset slow -crf 20 -pix_fmt yuv420p \
-  -color_primaries bt709 -color_trc bt709 -colorspace bt709 \
+  -c:v libx264 -preset slow -b:v 5000k -pass 2 -pix_fmt yuv420p -vf "$VF" \
+  -color_primaries bt709 -color_trc bt709 -colorspace bt709 -color_range tv \
   -c:a aac -b:a 192k -movflags +faststart showreel.mp4
 ```
+
+品質固定（`-crf 20`）でエンコードすると約92MBになり、リポジトリに置くには大きすぎたため、
+ビットレートを指定して容量を抑えています。動きの激しい都市の場面では細部が少し甘くなります。
 
 - 描画は途中で止めても、同じコマンドで続きから再開します（既にあるフレームは飛ばす）
 - 一部だけ確認するとき: `node render.js --out /tmp/still --times 5,14.5,30 --fast`
@@ -54,7 +64,7 @@ ffmpeg -framerate 30 -i /tmp/frames/f%05d.png -i /tmp/showreel.wav \
 
 ## 注意
 
-- GPUのない環境でも動きます（Chromium のソフトウェア描画）。同梱の mp4 は CPU 4コアの環境で描画しました
+- GPUのない環境でも動きます（Chromium のソフトウェア描画）。同梱の mp4 は CPU 4コア・GPUなしの環境で、描画に約45分かかりました
 - GPUやドライバが違うと、浮動小数点の丸めの差で画素単位では一致しないことがあります
 - 上記のフォントが入っていない環境では代替フォントになり、文字の見た目が変わります
 - 音楽は音量（約 −14 LUFS）と帯域バランスを数値で確認していますが、人の耳での試聴確認は経ていません
